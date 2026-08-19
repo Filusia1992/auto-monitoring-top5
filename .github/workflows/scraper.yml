@@ -26,14 +26,8 @@ jobs:
       - name: Run scraper
         run: python scraper_mobile.py
 
-      - name: Upload raw listings
+      - name: Upload mobile results
         uses: actions/upload-artifact@v4
         with:
-          name: top5_listings
-          path: top5_listings.json
-
-      - name: Upload filtered listings
-        uses: actions/upload-artifact@v4
-        with:
-          name: top5_filtered
-          path: top5_filtered.json
+          name: results_mobile
+          path: results_mobile.json
