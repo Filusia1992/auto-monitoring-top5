@@ -119,14 +119,11 @@ async def main():
                 listings = await scrape_page(page, url, model_name)
                 all_listings.extend(listings)
 
-        # Save raw results
         with open("top5_listings.json", "w", encoding="utf-8") as f:
             json.dump(all_listings, f, indent=4, ensure_ascii=False)
 
-        # Apply filtering
         filtered = [l for l in all_listings if filter_listing(l)]
 
-        # Save filtered results
         with open("top5_filtered.json", "w", encoding="utf-8") as f:
             json.dump(filtered, f, indent=4, ensure_ascii=False)
 
