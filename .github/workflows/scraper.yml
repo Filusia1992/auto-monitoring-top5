@@ -16,7 +16,7 @@ jobs:
       - run: pip install playwright
       - run: playwright install chromium
       - run: python scraper_top5.py
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: top5_listings
           path: top5_listings.json
