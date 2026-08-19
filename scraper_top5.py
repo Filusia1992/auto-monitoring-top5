@@ -1,6 +1,7 @@
 import asyncio
 from playwright.async_api import async_playwright
 import json
+import re
 
 SEARCH_CONFIG = [
     {
@@ -69,45 +70,25 @@ async def scrape_page(page, url, model_name):
 
     return listings
 
-async def main():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-
-        all_listings = []
-
-        for config in SEARCH_CONFIG:
-            model_name = config["name"]
-            for url in config["urls"]:
-                listings = await scrape_page(page, url, model_name)
-                all_listings.extend(listings)
-
-        with open("top5_listings.json", "w", encoding="utf-8") as f:
-            json.dump(all_listings, f, indent=4, ensure_ascii=False)
-
-        await browser.close()
-
-asyncio.run(main())
 def parse_price(price_str):
     try:
-        return int(price_str.replace("€", "").replace(".", "").replace(",", "").strip())
+        cleaned = price_str.replace("€", "").replace(".", "").replace(",", "").strip()
+        return int(cleaned)
     except:
         return None
 
 def parse_year(title):
-    import re
     match = re.search(r"(20\d{2})", title)
     return int(match.group(1)) if match else None
 
 def filter_listing(listing):
-    model = listing["model"]
-    price = parse_price(listing["price"])
-    year = parse_year(listing["title"])
+    model = listing.get("model")
+    price = parse_price(listing.get("price", ""))
+    year = parse_year(listing.get("title", ""))
 
     if price is None or year is None:
         return False
 
-    # Model-specific rules
     if model == "Toyota Yaris Hybrid":
         return price <= 8000 and year >= 2017
 
@@ -125,8 +106,30 @@ def filter_listing(listing):
 
     return False
 
-# Save filtered results
-filtered = [l for l in all_listings if filter_listing(l)]
+async def main():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
 
-with open("top5_filtered.json", "w", encoding="utf-8") as f:
-    json.dump(filtered, f, indent=4, ensure_ascii=False)
+        all_listings = []
+
+        for config in SEARCH_CONFIG:
+            model_name = config["name"]
+            for url in config["urls"]:
+                listings = await scrape_page(page, url, model_name)
+                all_listings.extend(listings)
+
+        # Save raw results
+        with open("top5_listings.json", "w", encoding="utf-8") as f:
+            json.dump(all_listings, f, indent=4, ensure_ascii=False)
+
+        # Apply filtering
+        filtered = [l for l in all_listings if filter_listing(l)]
+
+        # Save filtered results
+        with open("top5_filtered.json", "w", encoding="utf-8") as f:
+            json.dump(filtered, f, indent=4, ensure_ascii=False)
+
+        await browser.close()
+
+asyncio.run(main())
