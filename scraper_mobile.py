@@ -1,3 +1,23 @@
+async def auto_scroll(page):
+    await page.evaluate("""
+        async () => {
+            await new Promise((resolve) => {
+                let totalHeight = 0;
+                const distance = 800;
+                const timer = setInterval(() => {
+                    const scrollHeight = document.body.scrollHeight;
+                    window.scrollBy(0, distance);
+                    totalHeight += distance;
+
+                    if (totalHeight >= scrollHeight) {
+                        clearInterval(timer);
+                        resolve();
+                    }
+                }, 300);
+            });
+        }
+    """)
+
 import asyncio
 from playwright.async_api import async_playwright
 import json
@@ -22,7 +42,7 @@ async def scrape_details(page, url):
 
 async def scrape_mobile(page, url):
     await page.goto(url)
-    await page.wait_for_timeout(5000)
+    await auto_scroll(page)
 
     listings = []
 
