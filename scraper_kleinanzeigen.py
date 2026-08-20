@@ -117,11 +117,12 @@ def extract_fuel_from_details(details):
     return None
 
 def extract_fuel_from_description(desc):
-    if "benzin" in desc.lower():
+    dl = desc.lower()
+    if "benzin" in dl:
         return "benzin"
-    if "diesel" in desc.lower():
+    if "diesel" in dl:
         return "diesel"
-    if "hybrid" in desc.lower():
+    if "hybrid" in dl:
         return "hybrid"
     return None
 
@@ -148,12 +149,12 @@ def extract_equipment(soup, desc):
             txt = li.get_text(strip=True).lower()
             equip.append(txt)
 
-    desc_lower = desc.lower()
-    if "carplay" in desc_lower or "apple carplay" in desc_lower:
+    dl = desc.lower()
+    if "carplay" in dl or "apple carplay" in dl:
         equip.append("carplay")
-    if "android auto" in desc_lower:
+    if "android auto" in dl:
         equip.append("android auto")
-    if "armlehne" in desc_lower or "mittelarmlehne" in desc_lower:
+    if "armlehne" in dl or "mittelarmlehne" in dl:
         equip.append("armlehne")
 
     return equip
@@ -222,12 +223,15 @@ def filter_item(item):
     if price_value is None or price_value > 9000:
         return False
 
+    # rocznik – jeśli jest, musi być OK; jeśli brak, NIE odrzucamy
     if year is not None and year < 2017:
         return False
 
+    # przebieg – jeśli jest, musi być OK; jeśli brak, NIE odrzucamy
     if mileage is not None and mileage > 150000:
         return False
 
+    # paliwo – jeśli jest, preferujemy benzynę/hybrid/elektryka; jeśli brak, NIE odrzucamy
     if fuel is not None and not any(x in fuel for x in ["benzin", "hybrid", "strom"]):
         return False
 
@@ -235,11 +239,27 @@ def filter_item(item):
     return True
 
 def main():
-    list_html = fetch_html(LIST_URL)
-    raw_list = parse_list(list_html)
+    all_list_items = []
+
+    # kilka stron wyników – możesz zwiększyć range, jeśli chcesz
+    for page in range(1, 6):
+        if page == 1:
+            url = LIST_URL
+        else:
+            # jeśli ten format nie zadziała, możesz zmienić na np. f"{LIST_URL}/seite:{page}"
+            url = f"{LIST_URL}?page={page}"
+
+        try:
+            list_html = fetch_html(url)
+        except:
+            continue
+
+        page_items = parse_list(list_html)
+        all_list_items.extend(page_items)
+        time.sleep(1)
 
     enriched = []
-    for item in raw_list:
+    for item in all_list_items:
         if not is_car_basic(item):
             continue
         detail = fetch_and_enrich(item)
@@ -253,7 +273,7 @@ def main():
     filtered = [item for item in enriched if filter_item(item)]
     filtered.sort(key=lambda x: x["price_value"])
 
-    print("\n=== Auta pasujące do Twoich kryteriów (szczegółowy scraper + opis) ===\n")
+    print("\n=== Auta pasujące do Twoich kryteriów (wiele stron + opis) ===\n")
     if not filtered:
         print("Brak aut spełniających Twoje kryteria w dzisiejszych wynikach.")
     else:
