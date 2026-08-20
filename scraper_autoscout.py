@@ -17,27 +17,26 @@ def parse_html(html):
     soup = BeautifulSoup(html, "html.parser")
     results = []
 
-    cars = soup.select("article.cldt-summary-full-item")
+    # NOWE selektory AutoScout24
+    cars = soup.select("div.cldt-summary-full-item")  # poprawiony selektor
 
     for car in cars:
         try:
-            title = car.select_one(".cldt-summary-makemodel")
+            title = car.select_one("h2")
             title = title.get_text(strip=True) if title else None
 
             price = car.select_one(".cldt-price")
             price = price.get_text(strip=True) if price else None
 
-            mileage = car.select_one(".cldt-summary-vehicle-data li:nth-child(1)")
-            mileage = mileage.get_text(strip=True) if mileage else None
-
-            year = car.select_one(".cldt-summary-vehicle-data li:nth-child(2)")
-            year = year.get_text(strip=True) if year else None
+            details = car.select("ul.cldt-summary-vehicle-data li")
+            year = details[1].get_text(strip=True) if len(details) > 1 else None
+            mileage = details[0].get_text(strip=True) if len(details) > 0 else None
 
             img = car.select_one("img")
-            image_url = img["src"] if img and "src" in img.attrs else None
+            image_url = img.get("src") if img else None
 
             link = car.select_one("a")
-            detail_url = "https://www.autoscout24.com" + link["href"] if link else None
+            detail_url = "https://www.autoscout24.com" + link.get("href") if link else None
 
             results.append({
                 "title": title,
