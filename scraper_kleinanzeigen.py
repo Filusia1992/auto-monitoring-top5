@@ -113,10 +113,26 @@ def extract_mileage_from_description(desc):
     return None
 
 def extract_mileage_from_title(title):
-    m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", title)
+    t = title.lower()
+
+    m = re.search(r"(\d{1,3})\s*tkm", t)
+    if m:
+        return int(m.group(1)) * 1000
+
+    m = re.search(r"(\d{1,3})\s*t\s*km", t)
+    if m:
+        return int(m.group(1)) * 1000
+
+    m = re.search(r"(\d{2,3}[.]\d{3})", t)
+    if m:
+        raw = m.group(1).replace(".", "")
+        return int(raw)
+
+    m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", t)
     if m:
         raw = m.group(1).replace(".", "").replace(" ", "")
         return int(raw)
+
     return None
 
 def extract_fuel_from_details(details):
@@ -135,6 +151,14 @@ def extract_fuel_from_description(desc):
         return "hybrid"
     if "elektro" in dl or "strom" in dl:
         return "strom"
+    return None
+
+def extract_fuel_from_title(title):
+    t = title.lower()
+    if any(x in t for x in ["cdti", "tdi", "dci", "hdi"]):
+        return "diesel"
+    if any(x in t for x in ["1.0", "1.2", "1.3", "1.4", "1.6", "2.0"]):
+        return "benzin"
     return None
 
 def extract_location(soup, desc):
@@ -228,6 +252,7 @@ def fetch_and_enrich(item):
     fuel = (
         extract_fuel_from_details(details)
         or extract_fuel_from_description(description)
+        or extract_fuel_from_title(title)
     )
 
     location = extract_location(soup, description)
@@ -245,7 +270,6 @@ def fetch_and_enrich(item):
 
 def score_item(item):
     score = 0
-    title = item["title"].lower()
     price_value = parse_price(item["price"])
     year = item.get("year")
     mileage = item.get("mileage")
@@ -258,8 +282,8 @@ def score_item(item):
     if price_value is None or price_value > 9000:
         return -50
 
-    score += 10  # dobry model
-    score += max(0, 10 - (price_value // 1000))  # im taniej, tym lepiej
+    score += 10
+    score += max(0, 10 - (price_value // 1000))
 
     if year is not None:
         if year >= 2017:
@@ -334,7 +358,7 @@ def main():
     filtered = [item for item in enriched if item.get("score", -100) > 0]
     filtered.sort(key=lambda x: x["score"], reverse=True)
 
-    print("\n=== Auta pasujące do Twoich kryteriów (scraper 2.0 – scoring) ===\n")
+    print("\n=== Auta pasujące do Twoich kryteriów (scraper 2.1 – scoring) ===\n")
     if not filtered:
         print("Brak aut z dodatnim wynikiem w dzisiejszych wynikach.")
     else:
