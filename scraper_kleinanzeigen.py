@@ -1,56 +1,114 @@
 import json
-import requests
-from bs4 import BeautifulSoup
+import re
 
-URL = "https://www.kleinanzeigen.de/s-autos/toyota-yaris/k0"
+# Wczytaj dane z Kleinanzeigen
+with open("results_kleinanzeigen.json", "r", encoding="utf-8") as f:
+    data = json.load(f)
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-}
+# MODELE, KTÓRE CIĘ INTERESUJĄ (finalne TOP5)
+GOOD_MODELS = [
+    "yaris",      # Toyota Yaris Hybrid
+    "auris",      # Toyota Auris Hybrid
+    "stonic",     # Kia Stonic
+    "rapid",      # Skoda Rapid
+    "ceed",       # Kia Ceed
+]
 
-def fetch_html(url):
-    r = requests.get(url, headers=HEADERS)
-    r.raise_for_status()
-    return r.text
+# Słowa kluczowe dla części i śmieci
+BAD_KEYWORDS = [
+    "scheinwerfer", "kotflügel", "rücklicht", "felge", "stoßstange",
+    "lenkgetriebe", "schaltknauf", "instandsetzung", "blenden",
+    "konsole", "motorhaube", "fensterheberschalter", "traggelenk",
+    "rad", "konsolenumrandung", "xp", "pdc"
+]
 
-def parse_html(html):
-    soup = BeautifulSoup(html, "html.parser")
-    results = []
+# Filtr: czy to jest samochód z Twojej listy, a nie część
+def is_car(item):
+    title = item["title"].lower()
 
-    cars = soup.select("article.aditem")
+    # odrzucamy części/akcesoria
+    if any(bad in title for bad in BAD_KEYWORDS):
+        return False
 
-    for car in cars:
-        try:
-            title = car.select_one(".text-module-begin")
-            title = title.get_text(strip=True) if title else None
+    # odrzucamy GR Yaris (sportowy, nie Twoje kryteria)
+    if "gr yaris" in title:
+        return False
 
-            price = car.select_one(".aditem-main--middle--price-shipping--price")
-            price = price.get_text(strip=True) if price else None
+    # odrzucamy ogłoszenia "suche"
+    if "suche" in title:
+        return False
 
-            img = car.select_one("img")
-            image_url = img["src"] if img and "src" in img.attrs else None
+    # akceptujemy tylko modele z Twojej finalnej listy
+    if any(model in title for model in GOOD_MODELS):
+        return True
 
-            link = car.select_one("a")
-            detail_url = "https://www.kleinanzeigen.de" + link["href"] if link else None
+    return False
 
-            results.append({
-                "title": title,
-                "price": price,
-                "image": image_url,
-                "url": detail_url,
-                "platform": "kleinanzeigen"
-            })
-        except:
-            continue
+# Konwersja ceny na liczbę (w euro)
+def parse_price(price):
+    price = price.lower().replace("€", "").replace("vb", "").replace(".", "").replace(" ", "")
+    try:
+        return int(price)
+    except:
+        return None
 
-    return results
+# Próba wyciągnięcia rocznika z tytułu (np. "2018", "2019")
+def extract_year(title):
+    years = re.findall(r"\b(20[0-3][0-9])\b", title)
+    if not years:
+        return None
+    try:
+        return int(years[0])
+    except:
+        return None
 
-def main():
-    html = fetch_html(URL)
-    results = parse_html(html)
+# Próba wyciągnięcia przebiegu z tytułu (np. "150.000 km", "120000 km")
+def extract_mileage(title):
+    # szukamy liczby przed "km"
+    match = re.search(r"(\d{2,3}[.\s]?\d{3})\s*km", title.lower())
+    if not match:
+        return None
+    raw = match.group(1)
+    raw = raw.replace(".", "").replace(" ", "")
+    try:
+        return int(raw)
+    except:
+        return None
 
-    with open("results_kleinanzeigen.json", "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=4, ensure_ascii=False)
+# Filtrowanie samochodów zgodnie z Twoimi kryteriami
+cars = []
+for item in data:
+    if not is_car(item):
+        continue
 
-if __name__ == "__main__":
-    main()
+    title = item["title"]
+    price_value = parse_price(item["price"])
+    year = extract_year(title)
+    mileage = extract_mileage(title)
+
+    # cena musi być znana i ≤ 8500
+    if price_value is None or price_value > 8500:
+        continue
+
+    # jeśli rocznik jest podany, musi być ≥ 2017
+    if year is not None and year < 2017:
+        continue
+
+    # jeśli przebieg jest podany, musi być ≤ 150000 km
+    if mileage is not None and mileage > 150000:
+        continue
+
+    item["price_value"] = price_value
+    item["year"] = year
+    item["mileage"] = mileage
+    cars.append(item)
+
+# Sortowanie po cenie
+cars.sort(key=lambda x: x["price_value"])
+
+# Wynik końcowy
+print("\n=== Auta pasujące do Twoich preferencji (Kleinanzeigen) ===\n")
+for car in cars:
+    year_str = f"{car['year']}" if car.get("year") else "brak rocznika"
+    mileage_str = f"{car['mileage']} km" if car.get("mileage") else "brak przebiegu"
+    print(f"{car['title']} — {car['price']} — {year_str} — {mileage_str} — {car['url']}")
