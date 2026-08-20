@@ -11,14 +11,12 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
 }
 
-# MODELE, KTÓRE CIĘ INTERESUJĄ (z Nissan Pulsar)
 GOOD_MODELS = [
     "yaris", "auris", "stonic", "rapid", "ceed",
     "astra", "corsa", "fiesta", "focus", "cupra",
     "pulsar", "nissan pulsar"
 ]
 
-# Słowa kluczowe dla części i śmieci
 BAD_KEYWORDS = [
     "scheinwerfer", "kotflügel", "rücklicht", "felge", "stoßstange",
     "lenkgetriebe", "schaltknauf", "instandsetzung", "blenden",
@@ -26,7 +24,6 @@ BAD_KEYWORDS = [
     "rad", "konsolenumrandung", "xp", "pdc", "ankauf", "suche"
 ]
 
-# Złe silniki (Ford EcoBoost)
 BAD_ENGINES = [
     "ecoboost"
 ]
@@ -41,7 +38,6 @@ def parse_list(html):
     results = []
 
     cars = soup.select("article.aditem")
-
     for car in cars:
         try:
             title_el = car.select_one(".text-module-begin")
@@ -81,18 +77,24 @@ def get_detail_fields(soup):
 
 def extract_year_from_details(details):
     for key, value in details.items():
-        m = re.search(r"(20[0-3][0-9])", value)
+        m = re.search(r"(19[8-9]\d|20[0-3]\d)", value)
         if m:
             return int(m.group(1))
     return None
 
 def extract_year_from_description(desc):
-    m = re.search(r"(EZ|Baujahr|Bj\.?)\s*(20[0-3][0-9])", desc, re.IGNORECASE)
+    m = re.search(r"(EZ|Baujahr|Bj\.?)\s*(19[8-9]\d|20[0-3]\d)", desc, re.IGNORECASE)
     if m:
         return int(m.group(2))
-    m2 = re.search(r"(20[0-3][0-9])", desc)
+    m2 = re.search(r"(19[8-9]\d|20[0-3]\d)", desc)
     if m2:
         return int(m2.group(1))
+    return None
+
+def extract_year_from_title(title):
+    m = re.search(r"(19[8-9]\d|20[0-3]\d)", title)
+    if m:
+        return int(m.group(1))
     return None
 
 def extract_mileage_from_details(details):
@@ -105,6 +107,13 @@ def extract_mileage_from_details(details):
 
 def extract_mileage_from_description(desc):
     m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", desc)
+    if m:
+        raw = m.group(1).replace(".", "").replace(" ", "")
+        return int(raw)
+    return None
+
+def extract_mileage_from_title(title):
+    m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", title)
     if m:
         raw = m.group(1).replace(".", "").replace(" ", "")
         return int(raw)
@@ -124,6 +133,8 @@ def extract_fuel_from_description(desc):
         return "diesel"
     if "hybrid" in dl:
         return "hybrid"
+    if "elektro" in dl or "strom" in dl:
+        return "strom"
     return None
 
 def extract_location(soup, desc):
@@ -176,9 +187,15 @@ def is_car_basic(item):
 def parse_price(price):
     if not price:
         return None
-    price = price.lower().replace("€", "").replace("vb", "").replace(".", "").replace(" ", "")
+    p = price.lower()
+    p = re.sub(r"vb", "", p)
+    p = re.sub(r"[€\s]", "", p)
+    p = p.replace(".", "")
+    m = re.search(r"(\d+)", p)
+    if not m:
+        return None
     try:
-        return int(price)
+        return int(m.group(1))
     except:
         return None
 
@@ -194,10 +211,25 @@ def fetch_and_enrich(item):
     description = desc_el.get_text(" ", strip=True) if desc_el else ""
 
     details = get_detail_fields(soup)
+    title = item["title"]
 
-    year = extract_year_from_details(details) or extract_year_from_description(description)
-    mileage = extract_mileage_from_details(details) or extract_mileage_from_description(description)
-    fuel = extract_fuel_from_details(details) or extract_fuel_from_description(description)
+    year = (
+        extract_year_from_details(details)
+        or extract_year_from_description(description)
+        or extract_year_from_title(title)
+    )
+
+    mileage = (
+        extract_mileage_from_details(details)
+        or extract_mileage_from_description(description)
+        or extract_mileage_from_title(title)
+    )
+
+    fuel = (
+        extract_fuel_from_details(details)
+        or extract_fuel_from_description(description)
+    )
+
     location = extract_location(soup, description)
     equipment = extract_equipment(soup, description)
 
@@ -211,42 +243,68 @@ def fetch_and_enrich(item):
 
     return item
 
-def filter_item(item):
+def score_item(item):
+    score = 0
+    title = item["title"].lower()
     price_value = parse_price(item["price"])
     year = item.get("year")
     mileage = item.get("mileage")
     fuel = item.get("fuel")
+    location = item.get("location") or ""
 
     if not is_car_basic(item):
-        return False
+        return -100
 
     if price_value is None or price_value > 9000:
-        return False
+        return -50
 
-    # rocznik – jeśli jest, musi być OK; jeśli brak, NIE odrzucamy
-    if year is not None and year < 2017:
-        return False
+    score += 10  # dobry model
+    score += max(0, 10 - (price_value // 1000))  # im taniej, tym lepiej
 
-    # przebieg – jeśli jest, musi być OK; jeśli brak, NIE odrzucamy
-    if mileage is not None and mileage > 150000:
-        return False
+    if year is not None:
+        if year >= 2017:
+            score += 10
+        elif year >= 2010:
+            score += 5
+        else:
+            score -= 5
 
-    # paliwo – jeśli jest, preferujemy benzynę/hybrid/elektryka; jeśli brak, NIE odrzucamy
-    if fuel is not None and not any(x in fuel for x in ["benzin", "hybrid", "strom"]):
-        return False
+    if mileage is not None:
+        if mileage <= 150000:
+            score += 10
+        elif mileage <= 220000:
+            score += 3
+        else:
+            score -= 5
+
+    if fuel is not None:
+        if "benzin" in fuel or "hybrid" in fuel or "strom" in fuel:
+            score += 5
+        elif "diesel" in fuel:
+            score -= 2
+
+    if item.get("has_carplay"):
+        score += 3
+    if item.get("has_armrest"):
+        score += 2
+
+    loc_lower = location.lower()
+    if "goslar" in loc_lower:
+        score += 8
+    elif any(city in loc_lower for city in ["braunschweig", "hannover", "magdeburg", "kassel", "halle", "leipzig"]):
+        score += 4
 
     item["price_value"] = price_value
-    return True
+    item["score"] = score
+    return score
 
 def main():
     all_list_items = []
 
-    # kilka stron wyników – możesz zwiększyć range, jeśli chcesz
     for page in range(1, 6):
         if page == 1:
             url = LIST_URL
         else:
-            # jeśli ten format nie zadziała, możesz zmienić na np. f"{LIST_URL}/seite:{page}"
             url = f"{LIST_URL}?page={page}"
 
         try:
@@ -267,21 +325,24 @@ def main():
             enriched.append(detail)
         time.sleep(1)
 
+    for item in enriched:
+        score_item(item)
+
     with open("results_kleinanzeigen.json", "w", encoding="utf-8") as f:
         json.dump(enriched, f, indent=4, ensure_ascii=False)
 
-    filtered = [item for item in enriched if filter_item(item)]
-    filtered.sort(key=lambda x: x["price_value"])
+    filtered = [item for item in enriched if item.get("score", -100) > 0]
+    filtered.sort(key=lambda x: x["score"], reverse=True)
 
-    print("\n=== Auta pasujące do Twoich kryteriów (wiele stron + opis) ===\n")
+    print("\n=== Auta pasujące do Twoich kryteriów (scraper 2.0 – scoring) ===\n")
     if not filtered:
-        print("Brak aut spełniających Twoje kryteria w dzisiejszych wynikach.")
+        print("Brak aut z dodatnim wynikiem w dzisiejszych wynikach.")
     else:
         for car in filtered:
             year_str = car["year"] if car.get("year") else "brak rocznika"
             mileage_str = f"{car['mileage']} km" if car.get("mileage") else "brak przebiegu"
             loc_str = car["location"] if car.get("location") else "brak lokalizacji"
-            print(f"{car['title']} — {car['price']} — {year_str} — {mileage_str} — {loc_str} — {car['url']}")
+            print(f"[{car['score']}] {car['title']} — {car['price']} — {year_str} — {mileage_str} — {loc_str} — {car['url']}")
 
 if __name__ == "__main__":
     main()
