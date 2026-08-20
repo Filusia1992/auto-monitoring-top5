@@ -24,14 +24,14 @@ BAD_KEYWORDS = [
     "rad", "konsolenumrandung", "xp", "pdc", "ankauf", "suche"
 ]
 
-BAD_ENGINES = [
-    "ecoboost"
-]
+BAD_ENGINES = ["ecoboost"]
+
 
 def fetch_html(url):
     r = requests.get(url, headers=HEADERS)
     r.raise_for_status()
     return r.text
+
 
 def parse_list(html):
     soup = BeautifulSoup(html, "html.parser")
@@ -67,6 +67,7 @@ def parse_list(html):
 
     return results
 
+
 def get_detail_fields(soup):
     details = {}
     for dt, dd in zip(soup.find_all("dt"), soup.find_all("dd")):
@@ -75,12 +76,15 @@ def get_detail_fields(soup):
         details[key] = value
     return details
 
+
+# --- YEAR EXTRACTION ---
 def extract_year_from_details(details):
     for key, value in details.items():
         m = re.search(r"(19[8-9]\d|20[0-3]\d)", value)
         if m:
             return int(m.group(1))
     return None
+
 
 def extract_year_from_description(desc):
     m = re.search(r"(EZ|Baujahr|Bj\.?)\s*(19[8-9]\d|20[0-3]\d)", desc, re.IGNORECASE)
@@ -91,12 +95,23 @@ def extract_year_from_description(desc):
         return int(m2.group(1))
     return None
 
+
 def extract_year_from_title(title):
     m = re.search(r"(19[8-9]\d|20[0-3]\d)", title)
     if m:
         return int(m.group(1))
     return None
 
+
+def extract_year_from_tuv(desc):
+    m = re.search(r"TÜV\s*(\d{2})/(\d{2})", desc, re.IGNORECASE)
+    if m:
+        year = int("20" + m.group(2))
+        return year
+    return None
+
+
+# --- MILEAGE EXTRACTION ---
 def extract_mileage_from_details(details):
     for key, value in details.items():
         m = re.search(r"(\d{2,3}[.\s]?\d{3})", value)
@@ -105,6 +120,7 @@ def extract_mileage_from_details(details):
             return int(raw)
     return None
 
+
 def extract_mileage_from_description(desc):
     m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", desc)
     if m:
@@ -112,22 +128,27 @@ def extract_mileage_from_description(desc):
         return int(raw)
     return None
 
+
 def extract_mileage_from_title(title):
     t = title.lower()
 
+    # 51TKM
     m = re.search(r"(\d{1,3})\s*tkm", t)
     if m:
         return int(m.group(1)) * 1000
 
+    # 51 T KM
     m = re.search(r"(\d{1,3})\s*t\s*km", t)
     if m:
         return int(m.group(1)) * 1000
 
-    m = re.search(r"(\d{2,3}[.]\d{3})", t)
+    # 51.000
+    m = re.search(r"(\d{1,3}[.]\d{3})", t)
     if m:
         raw = m.group(1).replace(".", "")
         return int(raw)
 
+    # 51000 km
     m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", t)
     if m:
         raw = m.group(1).replace(".", "").replace(" ", "")
@@ -135,11 +156,14 @@ def extract_mileage_from_title(title):
 
     return None
 
+
+# --- FUEL EXTRACTION ---
 def extract_fuel_from_details(details):
     for key, value in details.items():
         if "kraftstoff" in key:
             return value.lower()
     return None
+
 
 def extract_fuel_from_description(desc):
     dl = desc.lower()
@@ -153,6 +177,7 @@ def extract_fuel_from_description(desc):
         return "strom"
     return None
 
+
 def extract_fuel_from_title(title):
     t = title.lower()
     if any(x in t for x in ["cdti", "tdi", "dci", "hdi"]):
@@ -161,6 +186,8 @@ def extract_fuel_from_title(title):
         return "benzin"
     return None
 
+
+# --- LOCATION ---
 def extract_location(soup, desc):
     loc_el = soup.find(string=re.compile("Standort"))
     if loc_el:
@@ -175,6 +202,8 @@ def extract_location(soup, desc):
 
     return None
 
+
+# --- EQUIPMENT ---
 def extract_equipment(soup, desc):
     equip = []
 
@@ -194,6 +223,8 @@ def extract_equipment(soup, desc):
 
     return equip
 
+
+# --- BASIC FILTER ---
 def is_car_basic(item):
     title = item["title"].lower()
 
@@ -207,6 +238,7 @@ def is_car_basic(item):
         return True
 
     return False
+
 
 def parse_price(price):
     if not price:
@@ -223,6 +255,8 @@ def parse_price(price):
     except:
         return None
 
+
+# --- ENRICH ---
 def fetch_and_enrich(item):
     try:
         html = fetch_html(item["url"])
@@ -241,6 +275,7 @@ def fetch_and_enrich(item):
         extract_year_from_details(details)
         or extract_year_from_description(description)
         or extract_year_from_title(title)
+        or extract_year_from_tuv(description)
     )
 
     mileage = (
@@ -268,8 +303,12 @@ def fetch_and_enrich(item):
 
     return item
 
+
+# --- SCORING ---
 def score_item(item):
     score = 0
+    title = item["title"].lower()
+    desc = item.get("description", "").lower()
     price_value = parse_price(item["price"])
     year = item.get("year")
     mileage = item.get("mileage")
@@ -307,6 +346,15 @@ def score_item(item):
         elif "diesel" in fuel:
             score -= 2
 
+    if "wenig km" in title or "wenig km" in desc:
+        score += 5
+
+    if "rentner" in title or "rentner" in desc:
+        score += 5
+
+    if "1.hand" in title or "1. hand" in desc:
+        score += 5
+
     if item.get("has_carplay"):
         score += 3
     if item.get("has_armrest"):
@@ -322,6 +370,8 @@ def score_item(item):
     item["score"] = score
     return score
 
+
+# --- MAIN ---
 def main():
     all_list_items = []
 
@@ -358,7 +408,7 @@ def main():
     filtered = [item for item in enriched if item.get("score", -100) > 0]
     filtered.sort(key=lambda x: x["score"], reverse=True)
 
-    print("\n=== Auta pasujące do Twoich kryteriów (scraper 2.1 – scoring) ===\n")
+    print("\n=== Auta pasujące do Twoich kryteriów (scraper 2.2 – scoring) ===\n")
     if not filtered:
         print("Brak aut z dodatnim wynikiem w dzisiejszych wynikach.")
     else:
