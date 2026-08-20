@@ -3,6 +3,11 @@ import re
 import time
 import requests
 from bs4 import BeautifulSoup
+from geopy.distance import geodesic
+from geopy.geocoders import Nominatim
+from PIL import Image
+import pytesseract
+from io import BytesIO
 
 BASE_URL = "https://www.kleinanzeigen.de"
 LIST_URL = "https://www.kleinanzeigen.de/s-autos/k0"
@@ -25,6 +30,18 @@ BAD_KEYWORDS = [
 ]
 
 BAD_ENGINES = ["ecoboost"]
+
+TELEGRAM_TOKEN = "WPROWADZ_TUTAJ_TOKEN"
+TELEGRAM_CHAT_ID = "WPROWADZ_TUTAJ_CHAT_ID"
+
+GOSLAR_COORDS = (51.904, 10.427)  # centrum Goslar
+
+
+def send_telegram(msg):
+    if TELEGRAM_TOKEN == "" or TELEGRAM_CHAT_ID == "":
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg})
 
 
 def fetch_html(url):
@@ -77,6 +94,22 @@ def get_detail_fields(soup):
     return details
 
 
+# --- OCR MILEAGE ---
+def extract_mileage_from_image(image_url):
+    try:
+        img_data = requests.get(image_url, timeout=5).content
+        img = Image.open(BytesIO(img_data))
+        text = pytesseract.image_to_string(img)
+
+        m = re.search(r"(\d{2,3}[.\s]?\d{3})", text)
+        if m:
+            raw = m.group(1).replace(".", "").replace(" ", "")
+            return int(raw)
+    except:
+        return None
+    return None
+
+
 # --- YEAR EXTRACTION ---
 def extract_year_from_details(details):
     for key, value in details.items():
@@ -103,11 +136,11 @@ def extract_year_from_title(title):
     return None
 
 
-def extract_year_from_tuv(desc):
+# --- TÜV (NOT YEAR) ---
+def extract_tuv_year(desc):
     m = re.search(r"TÜV\s*(\d{2})/(\d{2})", desc, re.IGNORECASE)
     if m:
-        year = int("20" + m.group(2))
-        return year
+        return int("20" + m.group(2))
     return None
 
 
@@ -132,23 +165,19 @@ def extract_mileage_from_description(desc):
 def extract_mileage_from_title(title):
     t = title.lower()
 
-    # 51TKM
     m = re.search(r"(\d{1,3})\s*tkm", t)
     if m:
         return int(m.group(1)) * 1000
 
-    # 51 T KM
     m = re.search(r"(\d{1,3})\s*t\s*km", t)
     if m:
         return int(m.group(1)) * 1000
 
-    # 51.000
     m = re.search(r"(\d{1,3}[.]\d{3})", t)
     if m:
         raw = m.group(1).replace(".", "")
         return int(raw)
 
-    # 51000 km
     m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", t)
     if m:
         raw = m.group(1).replace(".", "").replace(" ", "")
@@ -188,6 +217,9 @@ def extract_fuel_from_title(title):
 
 
 # --- LOCATION ---
+geolocator = Nominatim(user_agent="scraper24")
+
+
 def extract_location(soup, desc):
     loc_el = soup.find(string=re.compile("Standort"))
     if loc_el:
@@ -200,6 +232,18 @@ def extract_location(soup, desc):
     if m:
         return m.group(2).strip()
 
+    return None
+
+
+def compute_distance(location):
+    if not location:
+        return None
+    try:
+        loc = geolocator.geocode(location)
+        if loc:
+            return geodesic(GOSLAR_COORDS, (loc.latitude, loc.longitude)).km
+    except:
+        return None
     return None
 
 
@@ -234,10 +278,10 @@ def is_car_basic(item):
     if any(engine in title for engine in BAD_ENGINES):
         return False
 
-    if any(model in title for model in GOOD_MODELS):
-        return True
+    if not any(model in title for model in GOOD_MODELS):
+        return False
 
-    return False
+    return True
 
 
 def parse_price(price):
@@ -275,7 +319,6 @@ def fetch_and_enrich(item):
         extract_year_from_details(details)
         or extract_year_from_description(description)
         or extract_year_from_title(title)
-        or extract_year_from_tuv(description)
     )
 
     mileage = (
@@ -284,19 +327,28 @@ def fetch_and_enrich(item):
         or extract_mileage_from_title(title)
     )
 
+    if mileage is None and item["image"]:
+        mileage = extract_mileage_from_image(item["image"])
+
     fuel = (
         extract_fuel_from_details(details)
         or extract_fuel_from_description(description)
         or extract_fuel_from_title(title)
     )
 
+    tuv_year = extract_tuv_year(description)
+
     location = extract_location(soup, description)
+    distance = compute_distance(location)
+
     equipment = extract_equipment(soup, description)
 
     item["year"] = year
     item["mileage"] = mileage
     item["fuel"] = fuel
+    item["tuv_year"] = tuv_year
     item["location"] = location
+    item["distance_km"] = distance
     item["equipment"] = equipment
     item["has_carplay"] = "carplay" in equipment or "android auto" in equipment
     item["has_armrest"] = "armlehne" in equipment
@@ -313,7 +365,8 @@ def score_item(item):
     year = item.get("year")
     mileage = item.get("mileage")
     fuel = item.get("fuel")
-    location = item.get("location") or ""
+    tuv_year = item.get("tuv_year")
+    distance = item.get("distance_km")
 
     if not is_car_basic(item):
         return -100
@@ -346,6 +399,12 @@ def score_item(item):
         elif "diesel" in fuel:
             score -= 2
 
+    if tuv_year is not None:
+        if tuv_year >= 2027:
+            score += 5
+        if tuv_year >= 2028:
+            score += 8
+
     if "wenig km" in title or "wenig km" in desc:
         score += 5
 
@@ -355,16 +414,24 @@ def score_item(item):
     if "1.hand" in title or "1. hand" in desc:
         score += 5
 
+    if "scheckheft" in title or "scheckheft" in desc:
+        score += 5
+
+    if "unfallfrei" in title or "unfallfrei" in desc:
+        score += 4
+
     if item.get("has_carplay"):
         score += 3
     if item.get("has_armrest"):
         score += 2
 
-    loc_lower = location.lower()
-    if "goslar" in loc_lower:
-        score += 8
-    elif any(city in loc_lower for city in ["braunschweig", "hannover", "magdeburg", "kassel", "halle", "leipzig"]):
-        score += 4
+    if distance is not None:
+        if distance <= 50:
+            score += 10
+        elif distance <= 150:
+            score += 5
+        elif distance <= 300:
+            score += 2
 
     item["price_value"] = price_value
     item["score"] = score
@@ -390,8 +457,15 @@ def main():
         all_list_items.extend(page_items)
         time.sleep(1)
 
-    enriched = []
+    seen = set()
+    unique_items = []
     for item in all_list_items:
+        if item["url"] not in seen:
+            seen.add(item["url"])
+            unique_items.append(item)
+
+    enriched = []
+    for item in unique_items:
         if not is_car_basic(item):
             continue
         detail = fetch_and_enrich(item)
@@ -405,18 +479,18 @@ def main():
     with open("results_kleinanzeigen.json", "w", encoding="utf-8") as f:
         json.dump(enriched, f, indent=4, ensure_ascii=False)
 
-    filtered = [item for item in enriched if item.get("score", -100) > 0]
+    filtered = [item for item in enriched if item.get("score", -100) > 20]
     filtered.sort(key=lambda x: x["score"], reverse=True)
 
-    print("\n=== Auta pasujące do Twoich kryteriów (scraper 2.2 – scoring) ===\n")
+    print("\n=== Auta pasujące do Twoich kryteriów (scraper 2.4 – OCR + GEO + Telegram) ===\n")
     if not filtered:
-        print("Brak aut z dodatnim wynikiem w dzisiejszych wynikach.")
+        print("Brak aut z dodatnim wynikiem.")
     else:
         for car in filtered:
-            year_str = car["year"] if car.get("year") else "brak rocznika"
-            mileage_str = f"{car['mileage']} km" if car.get("mileage") else "brak przebiegu"
-            loc_str = car["location"] if car.get("location") else "brak lokalizacji"
-            print(f"[{car['score']}] {car['title']} — {car['price']} — {year_str} — {mileage_str} — {loc_str} — {car['url']}")
+            msg = f"[{car['score']}] {car['title']} — {car['price']} — {car['url']}"
+            print(msg)
+            send_telegram(msg)
+
 
 if __name__ == "__main__":
     main()
