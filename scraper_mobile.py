@@ -6,12 +6,21 @@ URL = "https://suchen.mobile.de/fahrzeuge/search.html?isSearchRequest=true&s=Car
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+    "Referer": "https://suchen.mobile.de/",
+    "Connection": "keep-alive",
+}
+
+COOKIES = {
+    "gdpr_consent": "1",
+    "mobilede-consent": "accepted",
+    "md_locale": "de_DE",
 }
 
 def fetch_html(url):
     try:
-        r = requests.get(url, headers=HEADERS, timeout=10)
+        r = requests.get(url, headers=HEADERS, cookies=COOKIES, timeout=10)
         r.raise_for_status()
         return r.text
     except Exception as e:
@@ -22,7 +31,6 @@ def parse_html(html):
     soup = BeautifulSoup(html, "html.parser")
     results = []
 
-    # Każde ogłoszenie jest w <article>
     cars = soup.find_all("article")
 
     for car in cars:
@@ -61,6 +69,10 @@ def parse_html(html):
 
 def main():
     html = fetch_html(URL)
+    if html is None:
+        print("No HTML received (403).")
+        return
+
     results = parse_html(html)
 
     with open("results_mobile.json", "w", encoding="utf-8") as f:
