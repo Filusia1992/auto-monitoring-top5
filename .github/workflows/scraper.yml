@@ -1,4 +1,4 @@
-name: Daily TOP5 Scraper
+name: Daily Scrapers
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-scraper:
+  run-scrapers:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,16 +18,23 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install Playwright
-        run: |
-          pip install playwright
-          playwright install chromium
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
 
-      - name: Run scraper
-        run: python scraper_mobile.py
+      - name: Run AutoScout24 scraper
+        run: python scraper_autoscout.py
 
-      - name: Upload mobile results
+      - name: Run Kleinanzeigen scraper
+        run: python scraper_kleinanzeigen.py
+
+      - name: Upload AutoScout24 results
         uses: actions/upload-artifact@v4
         with:
-          name: results_mobile
-          path: results_mobile.json
+          name: results_autoscout
+          path: results_autoscout.json
+
+      - name: Upload Kleinanzeigen results
+        uses: actions/upload-artifact@v4
+        with:
+          name: results_kleinanzeigen
+          path: results_kleinanzeigen.json
