@@ -1,79 +1,60 @@
 import json
-import requests
-from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
 URL = "https://suchen.mobile.de/fahrzeuge/search.html?isSearchRequest=true&s=Car&vc=Car&cn=DE&dam=false&fr=2016%3A2023&ml=%3A150000&p=4500%3A8500&gn=30823%2C+Garbsen%2C+Niedersachsen&rd=300&ll=52.4158598%2C9.5850153&asl=true&ft=PETROL&ft=HYBRID&ref=dsp"
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
-    "Referer": "https://suchen.mobile.de/",
-    "Connection": "keep-alive",
-}
-
-COOKIES = {
-    "gdpr_consent": "1",
-    "mobilede-consent": "accepted",
-    "md_locale": "de_DE",
-}
-
-def fetch_html(url):
-    try:
-        r = requests.get(url, headers=HEADERS, cookies=COOKIES, timeout=10)
-        r.raise_for_status()
-        return r.text
-    except Exception as e:
-        print("HTML error:", e)
-        return None
-
-def parse_html(html):
-    soup = BeautifulSoup(html, "html.parser")
+def main():
     results = []
 
-    cars = soup.find_all("article")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
 
-    for car in cars:
+        page.goto(URL, timeout=60000)
+
+        # Akceptacja cookies (jeśli są)
         try:
-            title = car.find("h3")
-            title = title.get_text(strip=True) if title else None
-
-            price = car.find("span", {"class": "price-block__price"})
-            price = price.get_text(strip=True) if price else None
-
-            year = car.find("span", {"class": "vehicle-data__year"})
-            year = year.get_text(strip=True) if year else None
-
-            mileage = car.find("span", {"class": "vehicle-data__mileage"})
-            mileage = mileage.get_text(strip=True) if mileage else None
-
-            img = car.find("img")
-            image_url = img["src"] if img and "src" in img.attrs else None
-
-            link = car.find("a")
-            detail_url = "https://suchen.mobile.de" + link["href"] if link and "href" in link.attrs else None
-
-            results.append({
-                "title": title,
-                "price": price,
-                "year": year,
-                "mileage": mileage,
-                "image": image_url,
-                "url": detail_url,
-                "platform": "mobile.de"
-            })
+            page.click("button:has-text('Akzeptieren')", timeout=3000)
         except:
-            continue
+            pass
 
-    return results
+        page.wait_for_selector("article", timeout=20000)
 
-def main():
-    html = fetch_html(URL)
-    if html is None:
-        print("No HTML received (403).")
-        return
+        cars = page.query_selector_all("article")
 
-    results = parse_html(html)
+        for car in cars:
+            try:
+                title = car.query_selector("h3")
+                title = title.inner_text().strip() if title else None
+
+                price = car.query_selector(".price-block__price")
+                price = price.inner_text().strip() if price else None
+
+                year = car.query_selector(".vehicle-data__year")
+                year = year.inner_text().strip() if year else None
+
+                mileage = car.query_selector(".vehicle-data__mileage")
+                mileage = mileage.inner_text().strip() if mileage else None
+
+                img = car.query_selector("img")
+                image_url = img.get_attribute("src") if img else None
+
+                link = car.query_selector("a")
+                detail_url = "https://suchen.mobile.de" + link.get_attribute("href") if link else None
+
+                results.append({
+                    "title": title,
+                    "price": price,
+                    "year": year,
+                    "mileage": mileage,
+                    "image": image_url,
+                    "url": detail_url,
+                    "platform": "mobile.de"
+                })
+            except:
+                continue
+
+        browser.close()
 
     with open("results_mobile.json", "w", encoding="utf-8") as f:
         json.dump(results, f, indent=4, ensure_ascii=False)
