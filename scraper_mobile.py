@@ -1,24 +1,41 @@
 import json
+import time
 from playwright.sync_api import sync_playwright
 
 URL = "https://suchen.mobile.de/fahrzeuge/search.html?isSearchRequest=true&s=Car&vc=Car&cn=DE&dam=false&fr=2016%3A2023&ml=%3A150000&p=4500%3A8500&gn=30823%2C+Garbsen%2C+Niedersachsen&rd=300&ll=52.4158598%2C9.5850153&asl=true&ft=PETROL&ft=HYBRID&ref=dsp"
+
+def auto_scroll(page):
+    for _ in range(20):
+        page.mouse.wheel(0, 2000)
+        time.sleep(0.5)
 
 def main():
     results = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        browser = p.chromium.launch(headless=False)  # HEADFUL MODE = działa
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        )
+        page = context.new_page()
 
         page.goto(URL, timeout=60000)
 
-        # Akceptacja cookies (jeśli są)
+        # Akceptacja cookies
         try:
-            page.click("button:has-text('Akzeptieren')", timeout=3000)
+            page.click("button:has-text('Akzeptieren')", timeout=5000)
         except:
             pass
 
-        page.wait_for_selector("article", timeout=20000)
+        # Czekamy na pierwsze elementy
+        try:
+            page.wait_for_selector("article", timeout=15000)
+        except:
+            # fallback — scrollowanie wymusza ładowanie JS
+            auto_scroll(page)
+
+        # Scrollujemy całą stronę, żeby załadować lazy-loading
+        auto_scroll(page)
 
         cars = page.query_selector_all("article")
 
