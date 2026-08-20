@@ -9,7 +9,7 @@ async def main():
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
 
-        # We go to the search page
+        # Go to search page
         await page.goto(SEARCH_URL)
 
         # Wait for page to load
