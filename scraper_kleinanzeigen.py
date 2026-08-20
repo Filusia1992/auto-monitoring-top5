@@ -11,7 +11,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
 }
 
-# MODELE, KTÓRE CIĘ INTERESUJĄ (dodano Nissan Pulsar)
+# MODELE, KTÓRE CIĘ INTERESUJĄ (z Nissan Pulsar)
 GOOD_MODELS = [
     "yaris", "auris", "stonic", "rapid", "ceed",
     "astra", "corsa", "fiesta", "focus", "cupra",
@@ -79,59 +79,84 @@ def get_detail_fields(soup):
         details[key] = value
     return details
 
-def extract_year(details):
+def extract_year_from_details(details):
     for key, value in details.items():
-        if "erstzulassung" in key or "baujahr" in key:
-            m = re.search(r"(20[0-3][0-9])", value)
-            if m:
-                return int(m.group(1))
+        m = re.search(r"(20[0-3][0-9])", value)
+        if m:
+            return int(m.group(1))
     return None
 
-def extract_mileage(details):
-    for key, value in details.items():
-        if "kilometerstand" in key or "laufleistung" in key:
-            m = re.search(r"(\d{2,3}[.\s]?\d{3})", value)
-            if m:
-                raw = m.group(1).replace(".", "").replace(" ", "")
-                return int(raw)
+def extract_year_from_description(desc):
+    m = re.search(r"(EZ|Baujahr|Bj\.?)\s*(20[0-3][0-9])", desc, re.IGNORECASE)
+    if m:
+        return int(m.group(2))
+    m2 = re.search(r"(20[0-3][0-9])", desc)
+    if m2:
+        return int(m2.group(1))
     return None
 
-def extract_fuel(details):
+def extract_mileage_from_details(details):
     for key, value in details.items():
-        if "kraftstoffart" in key or "kraftstoff" in key:
+        m = re.search(r"(\d{2,3}[.\s]?\d{3})", value)
+        if m:
+            raw = m.group(1).replace(".", "").replace(" ", "")
+            return int(raw)
+    return None
+
+def extract_mileage_from_description(desc):
+    m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", desc)
+    if m:
+        raw = m.group(1).replace(".", "").replace(" ", "")
+        return int(raw)
+    return None
+
+def extract_fuel_from_details(details):
+    for key, value in details.items():
+        if "kraftstoff" in key:
             return value.lower()
     return None
 
-def extract_location(soup):
+def extract_fuel_from_description(desc):
+    if "benzin" in desc.lower():
+        return "benzin"
+    if "diesel" in desc.lower():
+        return "diesel"
+    if "hybrid" in desc.lower():
+        return "hybrid"
+    return None
+
+def extract_location(soup, desc):
     loc_el = soup.find(string=re.compile("Standort"))
     if loc_el:
         parent = loc_el.parent
         next_el = parent.find_next("span")
         if next_el:
             return next_el.get_text(strip=True)
-    addr = soup.find("div", class_=re.compile("vip-address|address"))
-    if addr:
-        return addr.get_text(strip=True)
+
+    m = re.search(r"(steht in|location|ort)\s*([A-Za-zäöüÄÖÜß ]+)", desc, re.IGNORECASE)
+    if m:
+        return m.group(2).strip()
+
     return None
 
-def extract_equipment(soup):
+def extract_equipment(soup, desc):
+    equip = []
+
     equip_section = soup.find("ul", class_=re.compile("vip-features|features"))
-    if not equip_section:
-        return []
-    items = []
-    for li in equip_section.find_all("li"):
-        txt = li.get_text(strip=True)
-        if txt:
-            items.append(txt.lower())
-    return items
+    if equip_section:
+        for li in equip_section.find_all("li"):
+            txt = li.get_text(strip=True).lower()
+            equip.append(txt)
 
-def has_carplay_or_android_auto(equipment):
-    text = " ".join(equipment)
-    return "android auto" in text or "apple carplay" in text or "carplay" in text
+    desc_lower = desc.lower()
+    if "carplay" in desc_lower or "apple carplay" in desc_lower:
+        equip.append("carplay")
+    if "android auto" in desc_lower:
+        equip.append("android auto")
+    if "armlehne" in desc_lower or "mittelarmlehne" in desc_lower:
+        equip.append("armlehne")
 
-def has_armrest(equipment):
-    text = " ".join(equipment)
-    return "armlehne" in text or "mittelarmlehne" in text or "armrest" in text
+    return equip
 
 def is_car_basic(item):
     title = item["title"].lower()
@@ -163,15 +188,25 @@ def fetch_and_enrich(item):
         return None
 
     soup = BeautifulSoup(html, "html.parser")
+
+    desc_el = soup.find("div", class_=re.compile("ad-description|description"))
+    description = desc_el.get_text(" ", strip=True) if desc_el else ""
+
     details = get_detail_fields(soup)
 
-    item["year"] = extract_year(details)
-    item["mileage"] = extract_mileage(details)
-    item["fuel"] = extract_fuel(details)
-    item["location"] = extract_location(soup)
-    item["equipment"] = extract_equipment(soup)
-    item["has_carplay"] = has_carplay_or_android_auto(item["equipment"])
-    item["has_armrest"] = has_armrest(item["equipment"])
+    year = extract_year_from_details(details) or extract_year_from_description(description)
+    mileage = extract_mileage_from_details(details) or extract_mileage_from_description(description)
+    fuel = extract_fuel_from_details(details) or extract_fuel_from_description(description)
+    location = extract_location(soup, description)
+    equipment = extract_equipment(soup, description)
+
+    item["year"] = year
+    item["mileage"] = mileage
+    item["fuel"] = fuel
+    item["location"] = location
+    item["equipment"] = equipment
+    item["has_carplay"] = "carplay" in equipment or "android auto" in equipment
+    item["has_armrest"] = "armlehne" in equipment
 
     return item
 
@@ -203,9 +238,6 @@ def main():
     list_html = fetch_html(LIST_URL)
     raw_list = parse_list(list_html)
 
-    with open("results_kleinanzeigen_raw.json", "w", encoding="utf-8") as f:
-        json.dump(raw_list, f, indent=4, ensure_ascii=False)
-
     enriched = []
     for item in raw_list:
         if not is_car_basic(item):
@@ -221,7 +253,7 @@ def main():
     filtered = [item for item in enriched if filter_item(item)]
     filtered.sort(key=lambda x: x["price_value"])
 
-    print("\n=== Auta pasujące do Twoich kryteriów (szczegółowy scraper) ===\n")
+    print("\n=== Auta pasujące do Twoich kryteriów (szczegółowy scraper + opis) ===\n")
     if not filtered:
         print("Brak aut spełniających Twoje kryteria w dzisiejszych wynikach.")
     else:
