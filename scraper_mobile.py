@@ -1,16 +1,7 @@
 import json
 import requests
 
-SEARCH_URLS = [
-    # Kia Stonic
-    "https://suchen.mobile.de/fahrzeuge/api/search?vc=Car&makeModelVariant1.makeId=24100&makeModelVariant1.modelId=14&maxPrice=8000&minYear=2018&maxMileage=150000&zipcode=38690&radius=300",
-    
-    # Skoda Rapid
-    "https://suchen.mobile.de/fahrzeuge/api/search?vc=Car&makeModelVariant1.makeId=24100&makeModelVariant1.modelId=19&maxPrice=8000&minYear=2016&maxMileage=180000&zipcode=38690&radius=300",
-    
-    # Kia Ceed
-    "https://suchen.mobile.de/fahrzeuge/api/search?vc=Car&makeModelVariant1.makeId=17200&makeModelVariant1.modelId=57&maxPrice=8000&minYear=2018&maxMileage=150000&zipcode=38690&radius=300"
-]
+API_URL = "https://suchen.mobile.de/fahrzeuge/api/search?isSearchRequest=true&vc=Car&cn=DE&dam=false&fr=2016:2023&ml=:150000&p=4500:8500&gn=30823&rd=300&ft=PETROL&ft=HYBRID"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -18,17 +9,15 @@ HEADERS = {
 }
 
 def fetch_api(url):
-    """Fetches JSON data from mobile.de API."""
     try:
-        response = requests.get(url, headers=HEADERS, timeout=10)
-        response.raise_for_status()
-        return response.json()
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        r.raise_for_status()
+        return r.json()
     except Exception as e:
-        print(f"Error fetching {url}: {e}")
+        print("API error:", e)
         return None
 
-def parse_results(data, source_url):
-    """Extracts car listings from API JSON."""
+def parse_results(data):
     results = []
 
     if not data or "items" not in data:
@@ -51,7 +40,6 @@ def parse_results(data, source_url):
                 "mileage": mileage,
                 "image": image_url,
                 "url": f"https://suchen.mobile.de{detail_url}" if detail_url else None,
-                "source": source_url,
                 "platform": "mobile.de"
             })
         except:
@@ -60,15 +48,11 @@ def parse_results(data, source_url):
     return results
 
 def main():
-    all_results = []
-
-    for url in SEARCH_URLS:
-        data = fetch_api(url)
-        parsed = parse_results(data, url)
-        all_results.extend(parsed)
+    data = fetch_api(API_URL)
+    results = parse_results(data)
 
     with open("results_mobile.json", "w", encoding="utf-8") as f:
-        json.dump(all_results, f, indent=4, ensure_ascii=False)
+        json.dump(results, f, indent=4, ensure_ascii=False)
 
 if __name__ == "__main__":
     main()
