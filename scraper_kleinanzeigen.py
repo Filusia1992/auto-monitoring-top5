@@ -215,7 +215,7 @@ def main():
             enriched.append(detail)
         time.sleep(1)
 
-    with open("results_kleinanzeigen_detailed.json", "w", encoding="utf-8") as f:
+    with open("results_kleinanzeigen.json", "w", encoding="utf-8") as f:
         json.dump(enriched, f, indent=4, ensure_ascii=False)
 
     filtered = [item for item in enriched if filter_item(item)]
