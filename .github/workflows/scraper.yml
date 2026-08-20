@@ -7,11 +7,6 @@ on:
 
 jobs:
   run-scraper:
-        - name: Upload screenshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: mobile_debug
-          path: mobile_debug.png
     runs-on: ubuntu-latest
 
     steps:
@@ -30,6 +25,12 @@ jobs:
 
       - name: Run scraper
         run: python scraper_mobile.py
+
+      - name: Upload screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile_debug
+          path: mobile_debug.png
 
       - name: Upload mobile results
         uses: actions/upload-artifact@v4
