@@ -31,8 +31,8 @@ BAD_KEYWORDS = [
 
 BAD_ENGINES = ["ecoboost"]
 
-TELEGRAM_TOKEN = ""   # wstaw swój token
-TELEGRAM_CHAT_ID = "" # wstaw swój chat_id
+TELEGRAM_TOKEN = ""   # opcjonalnie
+TELEGRAM_CHAT_ID = "" # opcjonalnie
 
 GOSLAR_COORDS = (51.904, 10.427)
 
