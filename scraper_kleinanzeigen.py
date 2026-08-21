@@ -14,22 +14,19 @@ HEADERS = {
 # ============================
 #   TOP 10 MODELE
 # ============================
-TOP10_MODELS = {
-    # TOP 5 – pełne spełnienie kryteriów
-    "toyota yaris hybrid": {"segment": "B", "engine": "hybrid"},
-    "toyota auris hybrid": {"segment": "C", "engine": "hybrid"},
-    "kia stonic 1.4 mpi": {"segment": "B", "engine": "mpi"},
-    "skoda rapid 1.6 mpi": {"segment": "C", "engine": "mpi"},
-    "kia ceed 1.4 mpi": {"segment": "C", "engine": "mpi"},
-    "kia ceed 1.6 mpi": {"segment": "C", "engine": "mpi"},
-
-    # TOP 10 – częściowe spełnienie kryteriów
-    "opel corsa 1.2": {"segment": "B", "engine": "mpi"},
-    "opel corsa 1.4": {"segment": "B", "engine": "mpi"},
-    "mazda 2 1.5": {"segment": "B", "engine": "mpi"},
-    "mazda 3 2.0": {"segment": "C", "engine": "mpi"},
-    "mazda cx-3 2.0": {"segment": "B", "engine": "mpi"},
-}
+TOP10_MODELS = [
+    "toyota yaris hybrid",
+    "toyota auris hybrid",
+    "kia stonic 1.4",
+    "skoda rapid 1.6",
+    "kia ceed 1.4",
+    "kia ceed 1.6",
+    "opel corsa 1.2",
+    "opel corsa 1.4",
+    "mazda 2 1.5",
+    "mazda 3 2.0",
+    "mazda cx-3 2.0",
+]
 
 def match_top10_model(title):
     t = title.lower()
@@ -40,10 +37,10 @@ def match_top10_model(title):
 
 
 # ============================
-#   FILTR TOP 10
+#   FILTR TOP 10 (bez segmentu/silnika/wyposażenia)
 # ============================
 def is_top10(item):
-    title = item["title"].lower()
+    title = item.get("title", "").lower()
 
     # 1. Model musi być w TOP 10
     model = match_top10_model(title)
@@ -60,32 +57,10 @@ def is_top10(item):
     if year is None or year < 2017:
         return False
 
-    # 4. Segment B/C
-    segment = TOP10_MODELS[model]["segment"]
-    if segment not in ["B", "C"]:
-        return False
-
-    # 5. Silnik wolnossący lub hybrydowy
-    engine_type = TOP10_MODELS[model]["engine"]
-    if engine_type not in ["mpi", "hybrid"]:
-        return False
-
-    # 6. Wyposażenie: CarPlay / Android Auto / podłokietnik / PDC
-    equip = item.get("equipment", [])
-    equip_text = " ".join(equip).lower()
-
-    has_carplay = item.get("has_carplay", False)
-    has_armrest = item.get("has_armrest", False)
-
-    has_pdc = (
-        "park" in equip_text or
-        "pdc" in equip_text or
-        "sensor" in equip_text or
-        "einpark" in equip_text
-    )
-
-    if not (has_carplay or has_pdc or has_armrest):
-        return False
+    # UWAGA: usunięte filtry:
+    # - segment
+    # - typ silnika (wolnossący/hybrydowy)
+    # - wyposażenie (CarPlay / PDC / podłokietnik)
 
     return True
 
@@ -96,19 +71,23 @@ def is_top10(item):
 def score_top10(item):
     score = 0
 
-    model = match_top10_model(item["title"])
+    model = match_top10_model(item.get("title", ""))
     if model:
         score += 20
 
-    if item.get("year") and item["year"] >= 2020:
-        score += 10
-    elif item.get("year") and item["year"] >= 2017:
-        score += 5
+    year = item.get("year")
+    if year:
+        if year >= 2020:
+            score += 10
+        elif year >= 2017:
+            score += 5
 
-    if item.get("mileage") and item["mileage"] <= 120000:
-        score += 10
-    elif item.get("mileage") and item["mileage"] <= 160000:
-        score += 5
+    mileage = item.get("mileage")
+    if mileage:
+        if mileage <= 120000:
+            score += 10
+        elif mileage <= 160000:
+            score += 5
 
     if item.get("has_carplay"):
         score += 5
@@ -410,7 +389,6 @@ def main():
         all_list_items.extend(page_items)
         time.sleep(1)
 
-    # usuwanie duplikatów po URL
     unique = {}
     for item in all_list_items:
         unique[item["url"]] = item
@@ -419,8 +397,10 @@ def main():
     enriched = []
     for item in all_list_items:
         detail = fetch_and_enrich(item)
-        if detail and is_top10(detail):
-            enriched.append(detail)
+        if detail:
+            detail["price_value"] = parse_price(detail["price"])
+            if is_top10(detail):
+                enriched.append(detail)
         time.sleep(1)
 
     for item in enriched:
@@ -431,7 +411,7 @@ def main():
     with open("results_kleinanzeigen.json", "w", encoding="utf-8") as f:
         json.dump(enriched, f, indent=4, ensure_ascii=False)
 
-    print("Zapisano results_kleinanzeigen.json — FILTR TOP 10 AKTYWNY")
+    print("Zapisano results_kleinanzeigen.json — FILTR TOP 10 (bez segmentu/silnika/wyposażenia)")
 
 
 if __name__ == "__main__":
