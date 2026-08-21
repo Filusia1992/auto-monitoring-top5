@@ -31,11 +31,10 @@ BAD_KEYWORDS = [
 
 BAD_ENGINES = ["ecoboost"]
 
-TELEGRAM_TOKEN = "WPROWADZ_TUTAJ_TOKEN"
-TELEGRAM_CHAT_ID = "WPROWADZ_TUTAJ_CHAT_ID"
+TELEGRAM_TOKEN = ""   # wstaw swój token
+TELEGRAM_CHAT_ID = "" # wstaw swój chat_id
 
-GOSLAR_COORDS = (51.904, 10.427)  # centrum Goslar
-
+GOSLAR_COORDS = (51.904, 10.427)
 
 def send_telegram(msg):
     if TELEGRAM_TOKEN == "" or TELEGRAM_CHAT_ID == "":
@@ -43,18 +42,16 @@ def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg})
 
-
 def fetch_html(url):
     r = requests.get(url, headers=HEADERS)
     r.raise_for_status()
     return r.text
 
-
 def parse_list(html):
     soup = BeautifulSoup(html, "html.parser")
     results = []
-
     cars = soup.select("article.aditem")
+
     for car in cars:
         try:
             title_el = car.select_one(".text-module-begin")
@@ -84,128 +81,46 @@ def parse_list(html):
 
     return results
 
-
 def get_detail_fields(soup):
     details = {}
     for dt, dd in zip(soup.find_all("dt"), soup.find_all("dd")):
-        key = dt.get_text(strip=True).lower()
-        value = dd.get_text(strip=True)
-        details[key] = value
+        details[dt.get_text(strip=True).lower()] = dd.get_text(strip=True)
     return details
 
-
-# --- OCR MILEAGE ---
 def extract_mileage_from_image(image_url):
     try:
         img_data = requests.get(image_url, timeout=5).content
         img = Image.open(BytesIO(img_data))
         text = pytesseract.image_to_string(img)
-
         m = re.search(r"(\d{2,3}[.\s]?\d{3})", text)
         if m:
-            raw = m.group(1).replace(".", "").replace(" ", "")
-            return int(raw)
+            return int(m.group(1).replace(".", "").replace(" ", ""))
     except:
         return None
     return None
 
-
-# --- YEAR EXTRACTION ---
-def extract_year_from_details(details):
-    for key, value in details.items():
-        m = re.search(r"(19[8-9]\d|20[0-3]\d)", value)
-        if m:
-            return int(m.group(1))
-    return None
-
-
-def extract_year_from_description(desc):
-    m = re.search(r"(EZ|Baujahr|Bj\.?)\s*(19[8-9]\d|20[0-3]\d)", desc, re.IGNORECASE)
-    if m:
-        return int(m.group(2))
-    m2 = re.search(r"(19[8-9]\d|20[0-3]\d)", desc)
-    if m2:
-        return int(m2.group(1))
-    return None
-
-
 def extract_year_from_title(title):
     m = re.search(r"(19[8-9]\d|20[0-3]\d)", title)
-    if m:
-        return int(m.group(1))
-    return None
+    return int(m.group(1)) if m else None
 
-
-# --- TÜV (NOT YEAR) ---
 def extract_tuv_year(desc):
     m = re.search(r"TÜV\s*(\d{2})/(\d{2})", desc, re.IGNORECASE)
-    if m:
-        return int("20" + m.group(2))
-    return None
-
-
-# --- MILEAGE EXTRACTION ---
-def extract_mileage_from_details(details):
-    for key, value in details.items():
-        m = re.search(r"(\d{2,3}[.\s]?\d{3})", value)
-        if m:
-            raw = m.group(1).replace(".", "").replace(" ", "")
-            return int(raw)
-    return None
-
-
-def extract_mileage_from_description(desc):
-    m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", desc)
-    if m:
-        raw = m.group(1).replace(".", "").replace(" ", "")
-        return int(raw)
-    return None
-
+    return int("20" + m.group(2)) if m else None
 
 def extract_mileage_from_title(title):
     t = title.lower()
-
-    m = re.search(r"(\d{1,3})\s*tkm", t)
-    if m:
-        return int(m.group(1)) * 1000
-
-    m = re.search(r"(\d{1,3})\s*t\s*km", t)
-    if m:
-        return int(m.group(1)) * 1000
-
-    m = re.search(r"(\d{1,3}[.]\d{3})", t)
-    if m:
-        raw = m.group(1).replace(".", "")
-        return int(raw)
-
-    m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", t)
-    if m:
-        raw = m.group(1).replace(".", "").replace(" ", "")
-        return int(raw)
-
+    patterns = [
+        r"(\d{1,3})\s*tkm",
+        r"(\d{1,3})\s*t\s*km",
+        r"(\d{1,3}[.]\d{3})",
+        r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)"
+    ]
+    for p in patterns:
+        m = re.search(p, t)
+        if m:
+            raw = m.group(1).replace(".", "").replace(" ", "")
+            return int(raw) if raw.isdigit() else None
     return None
-
-
-# --- FUEL EXTRACTION ---
-def extract_fuel_from_details(details):
-    for key, value in details.items():
-        if "kraftstoff" in key:
-            return value.lower()
-    return None
-
-
-def extract_fuel_from_description(desc):
-    dl = desc.lower()
-    if "benzin" in dl:
-        return "benzin"
-    if "diesel" in dl:
-        return "diesel"
-    if "hybrid" in dl:
-        return "hybrid"
-    if "elektro" in dl or "strom" in dl:
-        return "strom"
-    return None
-
 
 def extract_fuel_from_title(title):
     t = title.lower()
@@ -215,25 +130,7 @@ def extract_fuel_from_title(title):
         return "benzin"
     return None
 
-
-# --- LOCATION ---
 geolocator = Nominatim(user_agent="scraper24")
-
-
-def extract_location(soup, desc):
-    loc_el = soup.find(string=re.compile("Standort"))
-    if loc_el:
-        parent = loc_el.parent
-        next_el = parent.find_next("span")
-        if next_el:
-            return next_el.get_text(strip=True)
-
-    m = re.search(r"(steht in|location|ort)\s*([A-Za-zäöüÄÖÜß ]+)", desc, re.IGNORECASE)
-    if m:
-        return m.group(2).strip()
-
-    return None
-
 
 def compute_distance(location):
     if not location:
@@ -246,29 +143,6 @@ def compute_distance(location):
         return None
     return None
 
-
-# --- EQUIPMENT ---
-def extract_equipment(soup, desc):
-    equip = []
-
-    equip_section = soup.find("ul", class_=re.compile("vip-features|features"))
-    if equip_section:
-        for li in equip_section.find_all("li"):
-            txt = li.get_text(strip=True).lower()
-            equip.append(txt)
-
-    dl = desc.lower()
-    if "carplay" in dl or "apple carplay" in dl:
-        equip.append("carplay")
-    if "android auto" in dl:
-        equip.append("android auto")
-    if "armlehne" in dl or "mittelarmlehne" in dl:
-        equip.append("armlehne")
-
-    return equip
-
-
-# --- BASIC FILTER ---
 def is_car_basic(item):
     title = item["title"].lower()
 
@@ -278,29 +152,20 @@ def is_car_basic(item):
     if any(engine in title for engine in BAD_ENGINES):
         return False
 
+    # zamiast odrzucać — zapisujemy, ale score = -999
     if not any(model in title for model in GOOD_MODELS):
-        return False
+        item["score"] = -999
+        return True
 
     return True
-
 
 def parse_price(price):
     if not price:
         return None
-    p = price.lower()
-    p = re.sub(r"vb", "", p)
-    p = re.sub(r"[€\s]", "", p)
-    p = p.replace(".", "")
+    p = re.sub(r"[€\s]|vb", "", price.lower()).replace(".", "")
     m = re.search(r"(\d+)", p)
-    if not m:
-        return None
-    try:
-        return int(m.group(1))
-    except:
-        return None
+    return int(m.group(1)) if m else None
 
-
-# --- ENRICH ---
 def fetch_and_enrich(item):
     try:
         html = fetch_html(item["url"])
@@ -308,40 +173,29 @@ def fetch_and_enrich(item):
         return None
 
     soup = BeautifulSoup(html, "html.parser")
-
     desc_el = soup.find("div", class_=re.compile("ad-description|description"))
     description = desc_el.get_text(" ", strip=True) if desc_el else ""
 
     details = get_detail_fields(soup)
     title = item["title"]
 
-    year = (
-        extract_year_from_details(details)
-        or extract_year_from_description(description)
-        or extract_year_from_title(title)
-    )
-
-    mileage = (
-        extract_mileage_from_details(details)
-        or extract_mileage_from_description(description)
-        or extract_mileage_from_title(title)
-    )
+    year = extract_year_from_title(title)
+    mileage = extract_mileage_from_title(title)
+    fuel = extract_fuel_from_title(title)
+    tuv_year = extract_tuv_year(description)
 
     if mileage is None and item["image"]:
         mileage = extract_mileage_from_image(item["image"])
 
-    fuel = (
-        extract_fuel_from_details(details)
-        or extract_fuel_from_description(description)
-        or extract_fuel_from_title(title)
-    )
+    location = None
+    loc_el = soup.find(string=re.compile("Standort"))
+    if loc_el:
+        parent = loc_el.parent
+        next_el = parent.find_next("span")
+        if next_el:
+            location = next_el.get_text(strip=True)
 
-    tuv_year = extract_tuv_year(description)
-
-    location = extract_location(soup, description)
     distance = compute_distance(location)
-
-    equipment = extract_equipment(soup, description)
 
     item["year"] = year
     item["mileage"] = mileage
@@ -349,18 +203,15 @@ def fetch_and_enrich(item):
     item["tuv_year"] = tuv_year
     item["location"] = location
     item["distance_km"] = distance
-    item["equipment"] = equipment
-    item["has_carplay"] = "carplay" in equipment or "android auto" in equipment
-    item["has_armrest"] = "armlehne" in equipment
 
     return item
 
-
-# --- SCORING ---
 def score_item(item):
+    if item.get("score") == -999:
+        return -999
+
     score = 0
     title = item["title"].lower()
-    desc = item.get("description", "").lower()
     price_value = parse_price(item["price"])
     year = item.get("year")
     mileage = item.get("mileage")
@@ -368,106 +219,52 @@ def score_item(item):
     tuv_year = item.get("tuv_year")
     distance = item.get("distance_km")
 
-    if not is_car_basic(item):
-        return -100
-
     if price_value is None or price_value > 9000:
         return -50
 
     score += 10
     score += max(0, 10 - (price_value // 1000))
 
-    if year is not None:
-        if year >= 2017:
-            score += 10
-        elif year >= 2010:
-            score += 5
-        else:
-            score -= 5
+    if year:
+        score += 10 if year >= 2017 else 5 if year >= 2010 else -5
 
-    if mileage is not None:
-        if mileage <= 150000:
-            score += 10
-        elif mileage <= 220000:
-            score += 3
-        else:
-            score -= 5
+    if mileage:
+        score += 10 if mileage <= 150000 else 3 if mileage <= 220000 else -5
 
-    if fuel is not None:
-        if "benzin" in fuel or "hybrid" in fuel or "strom" in fuel:
-            score += 5
-        elif "diesel" in fuel:
-            score -= 2
+    if fuel:
+        score += 5 if fuel in ["benzin", "hybrid", "strom"] else -2
 
-    if tuv_year is not None:
-        if tuv_year >= 2027:
-            score += 5
-        if tuv_year >= 2028:
-            score += 8
+    if tuv_year:
+        score += 5 if tuv_year >= 2027 else 0
+        score += 8 if tuv_year >= 2028 else 0
 
-    if "wenig km" in title or "wenig km" in desc:
-        score += 5
+    if distance:
+        score += 10 if distance <= 50 else 5 if distance <= 150 else 2 if distance <= 300 else 0
 
-    if "rentner" in title or "rentner" in desc:
-        score += 5
-
-    if "1.hand" in title or "1. hand" in desc:
-        score += 5
-
-    if "scheckheft" in title or "scheckheft" in desc:
-        score += 5
-
-    if "unfallfrei" in title or "unfallfrei" in desc:
-        score += 4
-
-    if item.get("has_carplay"):
-        score += 3
-    if item.get("has_armrest"):
-        score += 2
-
-    if distance is not None:
-        if distance <= 50:
-            score += 10
-        elif distance <= 150:
-            score += 5
-        elif distance <= 300:
-            score += 2
-
-    item["price_value"] = price_value
     item["score"] = score
     return score
 
-
-# --- MAIN ---
 def main():
-    all_list_items = []
+    all_items = []
 
     for page in range(1, 6):
-        if page == 1:
-            url = LIST_URL
-        else:
-            url = f"{LIST_URL}?page={page}"
-
+        url = LIST_URL if page == 1 else f"{LIST_URL}?page={page}"
         try:
             list_html = fetch_html(url)
         except:
             continue
-
-        page_items = parse_list(list_html)
-        all_list_items.extend(page_items)
+        all_items.extend(parse_list(list_html))
         time.sleep(1)
 
     seen = set()
     unique_items = []
-    for item in all_list_items:
+    for item in all_items:
         if item["url"] not in seen:
             seen.add(item["url"])
             unique_items.append(item)
 
     enriched = []
     for item in unique_items:
-        if not is_car_basic(item):
-            continue
         detail = fetch_and_enrich(item)
         if detail:
             enriched.append(detail)
@@ -479,18 +276,7 @@ def main():
     with open("results_kleinanzeigen.json", "w", encoding="utf-8") as f:
         json.dump(enriched, f, indent=4, ensure_ascii=False)
 
-    filtered = [item for item in enriched if item.get("score", -100) > 20]
-    filtered.sort(key=lambda x: x["score"], reverse=True)
-
-    print("\n=== Auta pasujące do Twoich kryteriów (scraper 2.4 – OCR + GEO + Telegram) ===\n")
-    if not filtered:
-        print("Brak aut z dodatnim wynikiem.")
-    else:
-        for car in filtered:
-            msg = f"[{car['score']}] {car['title']} — {car['price']} — {car['url']}"
-            print(msg)
-            send_telegram(msg)
-
+    print("Zapisano results_kleinanzeigen.json")
 
 if __name__ == "__main__":
     main()
