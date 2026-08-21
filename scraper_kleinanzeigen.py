@@ -11,31 +11,123 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
 }
 
-GOOD_MODELS = [
-    "yaris", "auris", "stonic", "rapid", "ceed",
-    "astra", "corsa", "fiesta", "focus", "cupra",
-    "pulsar", "nissan pulsar"
-]
+# ============================
+#   TOP 10 MODELE
+# ============================
+TOP10_MODELS = {
+    # TOP 5 – pełne spełnienie kryteriów
+    "toyota yaris hybrid": {"segment": "B", "engine": "hybrid"},
+    "toyota auris hybrid": {"segment": "C", "engine": "hybrid"},
+    "kia stonic 1.4 mpi": {"segment": "B", "engine": "mpi"},
+    "skoda rapid 1.6 mpi": {"segment": "C", "engine": "mpi"},
+    "kia ceed 1.4 mpi": {"segment": "C", "engine": "mpi"},
+    "kia ceed 1.6 mpi": {"segment": "C", "engine": "mpi"},
 
-BAD_KEYWORDS = [
-    "scheinwerfer", "kotflügel", "rücklicht", "felge", "stoßstange",
-    "lenkgetriebe", "schaltknauf", "instandsetzung", "blenden",
-    "konsole", "motorhaube", "fensterheberschalter", "traggelenk",
-    "rad", "konsolenumrandung", "xp", "pdc", "ankauf", "suche"
-]
+    # TOP 10 – częściowe spełnienie kryteriów
+    "opel corsa 1.2": {"segment": "B", "engine": "mpi"},
+    "opel corsa 1.4": {"segment": "B", "engine": "mpi"},
+    "mazda 2 1.5": {"segment": "B", "engine": "mpi"},
+    "mazda 3 2.0": {"segment": "C", "engine": "mpi"},
+    "mazda cx-3 2.0": {"segment": "B", "engine": "mpi"},
+}
 
-BAD_ENGINES = ["ecoboost"]
+def match_top10_model(title):
+    t = title.lower()
+    for model in TOP10_MODELS:
+        if model in t:
+            return model
+    return None
 
 
+# ============================
+#   FILTR TOP 10
+# ============================
+def is_top10(item):
+    title = item["title"].lower()
+
+    # 1. Model musi być w TOP 10
+    model = match_top10_model(title)
+    if not model:
+        return False
+
+    # 2. Cena ≤ 8000 €
+    price_value = item.get("price_value")
+    if price_value is None or price_value > 8000:
+        return False
+
+    # 3. Rocznik ≥ 2017
+    year = item.get("year")
+    if year is None or year < 2017:
+        return False
+
+    # 4. Segment B/C
+    segment = TOP10_MODELS[model]["segment"]
+    if segment not in ["B", "C"]:
+        return False
+
+    # 5. Silnik wolnossący lub hybrydowy
+    engine_type = TOP10_MODELS[model]["engine"]
+    if engine_type not in ["mpi", "hybrid"]:
+        return False
+
+    # 6. Wyposażenie: CarPlay / Android Auto / podłokietnik / PDC
+    equip = item.get("equipment", [])
+    equip_text = " ".join(equip).lower()
+
+    has_carplay = item.get("has_carplay", False)
+    has_armrest = item.get("has_armrest", False)
+
+    has_pdc = (
+        "park" in equip_text or
+        "pdc" in equip_text or
+        "sensor" in equip_text or
+        "einpark" in equip_text
+    )
+
+    if not (has_carplay or has_pdc or has_armrest):
+        return False
+
+    return True
+
+
+# ============================
+#   SCORING TOP 10
+# ============================
+def score_top10(item):
+    score = 0
+
+    model = match_top10_model(item["title"])
+    if model:
+        score += 20
+
+    if item.get("year") and item["year"] >= 2020:
+        score += 10
+    elif item.get("year") and item["year"] >= 2017:
+        score += 5
+
+    if item.get("mileage") and item["mileage"] <= 120000:
+        score += 10
+    elif item.get("mileage") and item["mileage"] <= 160000:
+        score += 5
+
+    if item.get("has_carplay"):
+        score += 5
+    if item.get("has_armrest"):
+        score += 3
+
+    item["score_top10"] = score
+    return score
+
+
+# ============================
+#   SCRAPER 2.0
+# ============================
 def fetch_html(url):
     r = requests.get(url, headers=HEADERS)
     r.raise_for_status()
     return r.text
 
 
-# ============================
-#   POPRAWIONE SELEKTORY 2026
-# ============================
 def parse_list(html):
     soup = BeautifulSoup(html, "html.parser")
     results = []
@@ -43,7 +135,6 @@ def parse_list(html):
     cars = soup.find_all("article", class_="aditem")
     for car in cars:
         try:
-            # tytuł
             title_el = car.find("a", class_="ellipsis")
             if not title_el:
                 title_el = car.find("h2")
@@ -51,7 +142,6 @@ def parse_list(html):
                 title_el = car.find("a", class_="aditem-main--title")
             title = title_el.get_text(strip=True) if title_el else None
 
-            # cena
             price_el = car.find("p", class_="aditem-main--price")
             if not price_el:
                 price_el = car.find("p", class_="aditem-main--middle--price")
@@ -59,11 +149,9 @@ def parse_list(html):
                 price_el = car.find("p", class_="aditem-main--middle--price-shipping--price")
             price = price_el.get_text(strip=True) if price_el else None
 
-            # link
             link = car.find("a", href=True)
             detail_url = BASE_URL + link["href"] if link else None
 
-            # zdjęcie
             img = car.find("img")
             image_url = img["src"] if img and "src" in img.attrs else None
 
@@ -77,19 +165,15 @@ def parse_list(html):
                 "url": detail_url,
                 "platform": "kleinanzeigen"
             })
-        except Exception:
+        except:
             continue
 
     return results
 
 
-# ============================
-#   PARSOWANIE SZCZEGÓŁÓW
-# ============================
 def get_detail_fields(soup):
     details = {}
 
-    # NOWA STRUKTURA KLEINANZEIGEN 2026
     vip = soup.find("div", class_="vip-details")
     if vip:
         for row in vip.find_all("div", class_="vip-detail"):
@@ -100,7 +184,6 @@ def get_detail_fields(soup):
                 val = value.get_text(strip=True)
                 details[key] = val
 
-    # STARA STRUKTURA (fallback)
     for dt, dd in zip(soup.find_all("dt"), soup.find_all("dd")):
         key = dt.get_text(strip=True).lower()
         value = dd.get_text(strip=True)
@@ -109,9 +192,6 @@ def get_detail_fields(soup):
     return details
 
 
-# ============================
-#   ROK
-# ============================
 def extract_year_from_details(details):
     for key, value in details.items():
         if any(k in key for k in ["ez", "baujahr", "bj"]):
@@ -135,9 +215,6 @@ def extract_year_from_title(title):
     return None
 
 
-# ============================
-#   PRZEBIEG
-# ============================
 def extract_mileage_from_details(details):
     for key, value in details.items():
         m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", value)
@@ -176,9 +253,6 @@ def extract_mileage_from_title(title):
     return None
 
 
-# ============================
-#   PALIWO
-# ============================
 def extract_fuel_from_details(details):
     for key, value in details.items():
         if "kraftstoff" in key:
@@ -212,9 +286,6 @@ def extract_fuel_from_title(title):
     return None
 
 
-# ============================
-#   LOKALIZACJA
-# ============================
 def extract_location(soup, desc):
     loc_el = soup.find(string=re.compile("Standort"))
     if loc_el:
@@ -235,9 +306,6 @@ def extract_location(soup, desc):
     return None
 
 
-# ============================
-#   WYPOSAŻENIE
-# ============================
 def extract_equipment(soup, desc):
     equip = []
 
@@ -258,27 +326,6 @@ def extract_equipment(soup, desc):
     return equip
 
 
-# ============================
-#   FILTRY PODSTAWOWE
-# ============================
-def is_car_basic(item):
-    title = item["title"].lower()
-
-    if any(bad in title for bad in BAD_KEYWORDS):
-        return False
-
-    if any(engine in title for engine in BAD_ENGINES):
-        return False
-
-    if any(model in title for model in GOOD_MODELS):
-        return True
-
-    return False
-
-
-# ============================
-#   CENA
-# ============================
 def parse_price(price):
     if not price:
         return None
@@ -298,9 +345,6 @@ def parse_price(price):
     return None
 
 
-# ============================
-#   ENRICH
-# ============================
 def fetch_and_enrich(item):
     try:
         html = fetch_html(item["url"])
@@ -348,65 +392,6 @@ def fetch_and_enrich(item):
 
 
 # ============================
-#   SCORING
-# ============================
-def score_item(item):
-    score = 0
-    title = item["title"].lower()
-    price_value = parse_price(item["price"])
-    year = item.get("year")
-    mileage = item.get("mileage")
-    fuel = item.get("fuel")
-    location = item.get("location") or ""
-
-    if not is_car_basic(item):
-        return -100
-
-    if price_value is None or price_value > 9000:
-        return -50
-
-    score += 10
-    score += max(0, 10 - (price_value // 1000))
-
-    if year is not None:
-        if year >= 2017:
-            score += 10
-        elif year >= 2010:
-            score += 5
-        else:
-            score -= 5
-
-    if mileage is not None:
-        if mileage <= 150000:
-            score += 10
-        elif mileage <= 220000:
-            score += 3
-        else:
-            score -= 5
-
-    if fuel is not None:
-        if "benzin" in fuel or "hybrid" in fuel or "strom" in fuel:
-            score += 5
-        elif "diesel" in fuel:
-            score -= 2
-
-    if item.get("has_carplay"):
-        score += 3
-    if item.get("has_armrest"):
-        score += 2
-
-    loc_lower = location.lower()
-    if "goslar" in loc_lower:
-        score += 8
-    elif any(city in loc_lower for city in ["braunschweig", "hannover", "magdeburg", "kassel", "halle", "leipzig"]):
-        score += 4
-
-    item["price_value"] = price_value
-    item["score"] = score
-    return score
-
-
-# ============================
 #   MAIN
 # ============================
 def main():
@@ -433,20 +418,20 @@ def main():
 
     enriched = []
     for item in all_list_items:
-        if not is_car_basic(item):
-            continue
         detail = fetch_and_enrich(item)
-        if detail:
+        if detail and is_top10(detail):
             enriched.append(detail)
         time.sleep(1)
 
     for item in enriched:
-        score_item(item)
+        score_top10(item)
+
+    enriched.sort(key=lambda x: x.get("score_top10", 0), reverse=True)
 
     with open("results_kleinanzeigen.json", "w", encoding="utf-8") as f:
         json.dump(enriched, f, indent=4, ensure_ascii=False)
 
-    print("Zapisano results_kleinanzeigen.json")
+    print("Zapisano results_kleinanzeigen.json — FILTR TOP 10 AKTYWNY")
 
 
 if __name__ == "__main__":
