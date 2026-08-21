@@ -33,6 +33,9 @@ def fetch_html(url):
     return r.text
 
 
+# ============================
+#   POPRAWIONE SELEKTORY 2026
+# ============================
 def parse_list(html):
     soup = BeautifulSoup(html, "html.parser")
     results = []
@@ -74,22 +77,41 @@ def parse_list(html):
                 "url": detail_url,
                 "platform": "kleinanzeigen"
             })
-        except Exception as e:
-            print("parse_list error:", e)
+        except Exception:
             continue
 
     return results
 
 
+# ============================
+#   PARSOWANIE SZCZEGÓŁÓW
+# ============================
 def get_detail_fields(soup):
     details = {}
+
+    # NOWA STRUKTURA KLEINANZEIGEN 2026
+    vip = soup.find("div", class_="vip-details")
+    if vip:
+        for row in vip.find_all("div", class_="vip-detail"):
+            label = row.find("span", class_="vip-detail-label")
+            value = row.find("span", class_="vip-detail-value")
+            if label and value:
+                key = label.get_text(strip=True).lower()
+                val = value.get_text(strip=True)
+                details[key] = val
+
+    # STARA STRUKTURA (fallback)
     for dt, dd in zip(soup.find_all("dt"), soup.find_all("dd")):
         key = dt.get_text(strip=True).lower()
         value = dd.get_text(strip=True)
         details[key] = value
+
     return details
 
 
+# ============================
+#   ROK
+# ============================
 def extract_year_from_details(details):
     for key, value in details.items():
         if any(k in key for k in ["ez", "baujahr", "bj"]):
@@ -113,6 +135,9 @@ def extract_year_from_title(title):
     return None
 
 
+# ============================
+#   PRZEBIEG
+# ============================
 def extract_mileage_from_details(details):
     for key, value in details.items():
         m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", value)
@@ -151,6 +176,9 @@ def extract_mileage_from_title(title):
     return None
 
 
+# ============================
+#   PALIWO
+# ============================
 def extract_fuel_from_details(details):
     for key, value in details.items():
         if "kraftstoff" in key:
@@ -184,6 +212,9 @@ def extract_fuel_from_title(title):
     return None
 
 
+# ============================
+#   LOKALIZACJA
+# ============================
 def extract_location(soup, desc):
     loc_el = soup.find(string=re.compile("Standort"))
     if loc_el:
@@ -204,6 +235,9 @@ def extract_location(soup, desc):
     return None
 
 
+# ============================
+#   WYPOSAŻENIE
+# ============================
 def extract_equipment(soup, desc):
     equip = []
 
@@ -224,6 +258,9 @@ def extract_equipment(soup, desc):
     return equip
 
 
+# ============================
+#   FILTRY PODSTAWOWE
+# ============================
 def is_car_basic(item):
     title = item["title"].lower()
 
@@ -239,6 +276,9 @@ def is_car_basic(item):
     return False
 
 
+# ============================
+#   CENA
+# ============================
 def parse_price(price):
     if not price:
         return None
@@ -258,6 +298,9 @@ def parse_price(price):
     return None
 
 
+# ============================
+#   ENRICH
+# ============================
 def fetch_and_enrich(item):
     try:
         html = fetch_html(item["url"])
@@ -304,6 +347,9 @@ def fetch_and_enrich(item):
     return item
 
 
+# ============================
+#   SCORING
+# ============================
 def score_item(item):
     score = 0
     title = item["title"].lower()
@@ -360,6 +406,9 @@ def score_item(item):
     return score
 
 
+# ============================
+#   MAIN
+# ============================
 def main():
     all_list_items = []
 
