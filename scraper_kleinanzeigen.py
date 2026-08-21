@@ -33,7 +33,6 @@ def fetch_html(url):
     return r.text
 
 
-# ⭐ POPRAWIONE SELEKTORY KLEINANZEIGEN 2026
 def parse_list(html):
     soup = BeautifulSoup(html, "html.parser")
     results = []
@@ -41,7 +40,7 @@ def parse_list(html):
     cars = soup.find_all("article", class_="aditem")
     for car in cars:
         try:
-            # Tytuł — nowa struktura
+            # tytuł
             title_el = car.find("a", class_="ellipsis")
             if not title_el:
                 title_el = car.find("h2")
@@ -49,7 +48,7 @@ def parse_list(html):
                 title_el = car.find("a", class_="aditem-main--title")
             title = title_el.get_text(strip=True) if title_el else None
 
-            # Cena — nowa struktura
+            # cena
             price_el = car.find("p", class_="aditem-main--price")
             if not price_el:
                 price_el = car.find("p", class_="aditem-main--middle--price")
@@ -57,11 +56,11 @@ def parse_list(html):
                 price_el = car.find("p", class_="aditem-main--middle--price-shipping--price")
             price = price_el.get_text(strip=True) if price_el else None
 
-            # Link — nowa struktura
+            # link
             link = car.find("a", href=True)
             detail_url = BASE_URL + link["href"] if link else None
 
-            # Zdjęcie — nowa struktura
+            # zdjęcie
             img = car.find("img")
             image_url = img["src"] if img and "src" in img.attrs else None
 
@@ -93,9 +92,10 @@ def get_detail_fields(soup):
 
 def extract_year_from_details(details):
     for key, value in details.items():
-        m = re.search(r"(19[8-9]\d|20[0-3]\d)", value)
-        if m:
-            return int(m.group(1))
+        if any(k in key for k in ["ez", "baujahr", "bj"]):
+            m = re.search(r"(19[8-9]\d|20[0-3]\d)", value)
+            if m:
+                return int(m.group(1))
     return None
 
 
@@ -103,25 +103,23 @@ def extract_year_from_description(desc):
     m = re.search(r"(EZ|Baujahr|Bj\.?)\s*(19[8-9]\d|20[0-3]\d)", desc, re.IGNORECASE)
     if m:
         return int(m.group(2))
-    m2 = re.search(r"(19[8-9]\d|20[0-3]\d)", desc)
-    if m2:
-        return int(m2.group(1))
     return None
 
 
 def extract_year_from_title(title):
-    m = re.search(r"(19[8-9]\d|20[0-3]\d)", title)
+    m = re.search(r"(Bj\.?\s*(19[8-9]\d|20[0-3]\d))", title, re.IGNORECASE)
     if m:
-        return int(m.group(1))
+        return int(m.group(2))
     return None
 
 
 def extract_mileage_from_details(details):
     for key, value in details.items():
-        m = re.search(r"(\d{2,3}[.\s]?\d{3})", value)
+        m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", value)
         if m:
             raw = m.group(1).replace(".", "").replace(" ", "")
-            return int(raw)
+            if raw.isdigit():
+                return int(raw)
     return None
 
 
@@ -129,15 +127,27 @@ def extract_mileage_from_description(desc):
     m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", desc)
     if m:
         raw = m.group(1).replace(".", "").replace(" ", "")
-        return int(raw)
+        if raw.isdigit():
+            return int(raw)
     return None
 
 
 def extract_mileage_from_title(title):
-    m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", title)
-    if m:
-        raw = m.group(1).replace(".", "").replace(" ", "")
-        return int(raw)
+    t = title.lower()
+
+    patterns = [
+        r"(\d{1,3})\s*tkm",
+        r"(\d{1,3})\s*t\s*km",
+        r"(\d{1,3}[.]\d{3})",
+        r"(\d{2,3}[.\s]?\d{3})\s*km"
+    ]
+
+    for p in patterns:
+        m = re.search(p, t)
+        if m:
+            raw = m.group(1).replace(".", "").replace(" ", "")
+            if raw.isdigit():
+                return int(raw)
     return None
 
 
@@ -161,17 +171,35 @@ def extract_fuel_from_description(desc):
     return None
 
 
+def extract_fuel_from_title(title):
+    t = title.lower()
+    if any(x in t for x in ["tdi", "dci", "cdti", "hdi"]):
+        return "diesel"
+    if any(x in t for x in ["benz", "benzin"]):
+        return "benzin"
+    if "hybrid" in t:
+        return "hybrid"
+    if "elektro" in t or "ev" in t:
+        return "strom"
+    return None
+
+
 def extract_location(soup, desc):
     loc_el = soup.find(string=re.compile("Standort"))
     if loc_el:
         parent = loc_el.parent
         next_el = parent.find_next("span")
         if next_el:
-            return next_el.get_text(strip=True)
+            txt = next_el.get_text(strip=True)
+            if re.search(r"\d{2,3}[.\s]?\d{3}\s*km", txt.lower()):
+                return None
+            return txt
 
     m = re.search(r"(steht in|location|ort)\s*([A-Za-zäöüÄÖÜß ]+)", desc, re.IGNORECASE)
     if m:
-        return m.group(2).strip()
+        candidate = m.group(2).strip()
+        if not re.search(r"\d", candidate):
+            return candidate
 
     return None
 
@@ -214,17 +242,20 @@ def is_car_basic(item):
 def parse_price(price):
     if not price:
         return None
-    p = price.lower()
-    p = re.sub(r"vb", "", p)
-    p = re.sub(r"[€\s]", "", p)
-    p = p.replace(".", "")
-    m = re.search(r"(\d+)", p)
-    if not m:
-        return None
-    try:
-        return int(m.group(1))
-    except:
-        return None
+
+    cleaned = re.sub(r"[^\d.]", "", price)
+
+    if "." in cleaned:
+        parts = cleaned.split(".")
+        if len(parts) > 2:
+            cleaned = parts[0] + parts[1]
+        else:
+            cleaned = cleaned.replace(".", "")
+
+    if cleaned.isdigit():
+        return int(cleaned)
+
+    return None
 
 
 def fetch_and_enrich(item):
@@ -256,6 +287,7 @@ def fetch_and_enrich(item):
     fuel = (
         extract_fuel_from_details(details)
         or extract_fuel_from_description(description)
+        or extract_fuel_from_title(title)
     )
 
     location = extract_location(soup, description)
@@ -343,6 +375,12 @@ def main():
         print(f"Strona {page}: znaleziono {len(page_items)} ogłoszeń")
         all_list_items.extend(page_items)
         time.sleep(1)
+
+    # usuwanie duplikatów po URL
+    unique = {}
+    for item in all_list_items:
+        unique[item["url"]] = item
+    all_list_items = list(unique.values())
 
     enriched = []
     for item in all_list_items:
