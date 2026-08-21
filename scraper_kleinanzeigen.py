@@ -24,32 +24,45 @@ BAD_KEYWORDS = [
     "rad", "konsolenumrandung", "xp", "pdc", "ankauf", "suche"
 ]
 
-BAD_ENGINES = [
-    "ecoboost"
-]
+BAD_ENGINES = ["ecoboost"]
+
 
 def fetch_html(url):
     r = requests.get(url, headers=HEADERS)
     r.raise_for_status()
     return r.text
 
+
+# ⭐ POPRAWIONE SELEKTORY KLEINANZEIGEN 2026
 def parse_list(html):
     soup = BeautifulSoup(html, "html.parser")
     results = []
 
-    cars = soup.select("article.aditem")
+    cars = soup.find_all("article", class_="aditem")
     for car in cars:
         try:
-            title_el = car.select_one(".text-module-begin")
+            # Tytuł — nowa struktura
+            title_el = car.find("a", class_="ellipsis")
+            if not title_el:
+                title_el = car.find("h2")
+            if not title_el:
+                title_el = car.find("a", class_="aditem-main--title")
             title = title_el.get_text(strip=True) if title_el else None
 
-            price_el = car.select_one(".aditem-main--middle--price-shipping--price")
+            # Cena — nowa struktura
+            price_el = car.find("p", class_="aditem-main--price")
+            if not price_el:
+                price_el = car.find("p", class_="aditem-main--middle--price")
+            if not price_el:
+                price_el = car.find("p", class_="aditem-main--middle--price-shipping--price")
             price = price_el.get_text(strip=True) if price_el else None
 
-            link = car.select_one("a")
-            detail_url = BASE_URL + link["href"] if link and "href" in link.attrs else None
+            # Link — nowa struktura
+            link = car.find("a", href=True)
+            detail_url = BASE_URL + link["href"] if link else None
 
-            img = car.select_one("img")
+            # Zdjęcie — nowa struktura
+            img = car.find("img")
             image_url = img["src"] if img and "src" in img.attrs else None
 
             if not title or not detail_url:
@@ -62,10 +75,12 @@ def parse_list(html):
                 "url": detail_url,
                 "platform": "kleinanzeigen"
             })
-        except:
+        except Exception as e:
+            print("parse_list error:", e)
             continue
 
     return results
+
 
 def get_detail_fields(soup):
     details = {}
@@ -75,12 +90,14 @@ def get_detail_fields(soup):
         details[key] = value
     return details
 
+
 def extract_year_from_details(details):
     for key, value in details.items():
         m = re.search(r"(19[8-9]\d|20[0-3]\d)", value)
         if m:
             return int(m.group(1))
     return None
+
 
 def extract_year_from_description(desc):
     m = re.search(r"(EZ|Baujahr|Bj\.?)\s*(19[8-9]\d|20[0-3]\d)", desc, re.IGNORECASE)
@@ -91,11 +108,13 @@ def extract_year_from_description(desc):
         return int(m2.group(1))
     return None
 
+
 def extract_year_from_title(title):
     m = re.search(r"(19[8-9]\d|20[0-3]\d)", title)
     if m:
         return int(m.group(1))
     return None
+
 
 def extract_mileage_from_details(details):
     for key, value in details.items():
@@ -105,12 +124,14 @@ def extract_mileage_from_details(details):
             return int(raw)
     return None
 
+
 def extract_mileage_from_description(desc):
     m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", desc)
     if m:
         raw = m.group(1).replace(".", "").replace(" ", "")
         return int(raw)
     return None
+
 
 def extract_mileage_from_title(title):
     m = re.search(r"(\d{2,3}[.\s]?\d{3})\s*(km|KM|Km)", title)
@@ -119,11 +140,13 @@ def extract_mileage_from_title(title):
         return int(raw)
     return None
 
+
 def extract_fuel_from_details(details):
     for key, value in details.items():
         if "kraftstoff" in key:
             return value.lower()
     return None
+
 
 def extract_fuel_from_description(desc):
     dl = desc.lower()
@@ -136,6 +159,7 @@ def extract_fuel_from_description(desc):
     if "elektro" in dl or "strom" in dl:
         return "strom"
     return None
+
 
 def extract_location(soup, desc):
     loc_el = soup.find(string=re.compile("Standort"))
@@ -150,6 +174,7 @@ def extract_location(soup, desc):
         return m.group(2).strip()
 
     return None
+
 
 def extract_equipment(soup, desc):
     equip = []
@@ -170,6 +195,7 @@ def extract_equipment(soup, desc):
 
     return equip
 
+
 def is_car_basic(item):
     title = item["title"].lower()
 
@@ -183,6 +209,7 @@ def is_car_basic(item):
         return True
 
     return False
+
 
 def parse_price(price):
     if not price:
@@ -198,6 +225,7 @@ def parse_price(price):
         return int(m.group(1))
     except:
         return None
+
 
 def fetch_and_enrich(item):
     try:
@@ -243,6 +271,7 @@ def fetch_and_enrich(item):
 
     return item
 
+
 def score_item(item):
     score = 0
     title = item["title"].lower()
@@ -258,8 +287,8 @@ def score_item(item):
     if price_value is None or price_value > 9000:
         return -50
 
-    score += 10  # dobry model
-    score += max(0, 10 - (price_value // 1000))  # im taniej, tym lepiej
+    score += 10
+    score += max(0, 10 - (price_value // 1000))
 
     if year is not None:
         if year >= 2017:
@@ -298,14 +327,12 @@ def score_item(item):
     item["score"] = score
     return score
 
+
 def main():
     all_list_items = []
 
     for page in range(1, 6):
-        if page == 1:
-            url = LIST_URL
-        else:
-            url = f"{LIST_URL}?page={page}"
+        url = LIST_URL if page == 1 else f"{LIST_URL}?page={page}"
 
         try:
             list_html = fetch_html(url)
@@ -313,6 +340,7 @@ def main():
             continue
 
         page_items = parse_list(list_html)
+        print(f"Strona {page}: znaleziono {len(page_items)} ogłoszeń")
         all_list_items.extend(page_items)
         time.sleep(1)
 
@@ -331,18 +359,8 @@ def main():
     with open("results_kleinanzeigen.json", "w", encoding="utf-8") as f:
         json.dump(enriched, f, indent=4, ensure_ascii=False)
 
-    filtered = [item for item in enriched if item.get("score", -100) > 0]
-    filtered.sort(key=lambda x: x["score"], reverse=True)
+    print("Zapisano results_kleinanzeigen.json")
 
-    print("\n=== Auta pasujące do Twoich kryteriów (scraper 2.0 – scoring) ===\n")
-    if not filtered:
-        print("Brak aut z dodatnim wynikiem w dzisiejszych wynikach.")
-    else:
-        for car in filtered:
-            year_str = car["year"] if car.get("year") else "brak rocznika"
-            mileage_str = f"{car['mileage']} km" if car.get("mileage") else "brak przebiegu"
-            loc_str = car["location"] if car.get("location") else "brak lokalizacji"
-            print(f"[{car['score']}] {car['title']} — {car['price']} — {year_str} — {mileage_str} — {loc_str} — {car['url']}")
 
 if __name__ == "__main__":
     main()
