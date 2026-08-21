@@ -11,29 +11,30 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
 }
 
-# MODELE – dopasowanie po słowach w tytule
-MODEL_KEYWORDS = [
-    "yaris hybrid",
-    "auris hybrid",
-    "stonic",
-    "rapid",
-    "ceed",
-    "corsa",
-    "mazda 2",
-    "mazda 3",
-    "cx-3",
+MODEL_PATTERNS = [
+    ["yaris"],
+    ["auris"],
+    ["stonic"],
+    ["rapid"],
+    ["ceed"],
+    ["corsa"],
+    ["mazda", "2"],
+    ["mazda", "3"],
+    ["cx-3"],
+    ["cx3"],
 ]
 
 def title_matches_model(title):
     t = title.lower()
-    return any(keyword in t for keyword in MODEL_KEYWORDS)
-
+    for pattern in MODEL_PATTERNS:
+        if all(token in t for token in pattern):
+            return True
+    return False
 
 def fetch_html(url):
     r = requests.get(url, headers=HEADERS)
     r.raise_for_status()
     return r.text
-
 
 def parse_list(html):
     soup = BeautifulSoup(html, "html.parser")
@@ -42,18 +43,14 @@ def parse_list(html):
     cars = soup.find_all("article", class_="aditem")
     for car in cars:
         try:
-            title_el = car.find("a", class_="ellipsis")
-            if not title_el:
-                title_el = car.find("h2")
-            if not title_el:
-                title_el = car.find("a", class_="aditem-main--title")
+            title_el = car.find("a", class_="ellipsis") or car.find("h2") or car.find("a", class_="aditem-main--title")
             title = title_el.get_text(strip=True) if title_el else None
 
-            price_el = car.find("p", class_="aditem-main--price")
-            if not price_el:
-                price_el = car.find("p", class_="aditem-main--middle--price")
-            if not price_el:
-                price_el = car.find("p", class_="aditem-main--middle--price-shipping--price")
+            price_el = (
+                car.find("p", class_="aditem-main--price")
+                or car.find("p", class_="aditem-main--middle--price")
+                or car.find("p", class_="aditem-main--middle--price-shipping--price")
+            )
             price = price_el.get_text(strip=True) if price_el else None
 
             link = car.find("a", href=True)
@@ -76,7 +73,6 @@ def parse_list(html):
 
     return results
 
-
 def get_detail_fields(soup):
     details = {}
 
@@ -93,27 +89,22 @@ def get_detail_fields(soup):
 
     return details
 
-
 def extract_year(details, desc, title):
-    # VIP-details
     for key, value in details.items():
         if any(k in key for k in ["ez", "erstzulassung", "baujahr", "bj"]):
-            m = re.search(r"(19[8-9]\d|20[0-3]\d)", value)
+            m = re.search(r"(20[0-3]\d|19[8-9]\d)", value)
             if m:
                 return int(m.group(1))
 
-    # description
-    m = re.search(r"(19[8-9]\d|20[0-3]\d)", desc)
+    m = re.search(r"(20[0-3]\d|19[8-9]\d)", desc)
     if m:
         return int(m.group(1))
 
-    # title
-    m = re.search(r"(19[8-9]\d|20[0-3]\d)", title)
+    m = re.search(r"(20[0-3]\d|19[8-9]\d)", title)
     if m:
         return int(m.group(1))
 
     return None
-
 
 def parse_price(price):
     if not price:
@@ -122,7 +113,6 @@ def parse_price(price):
     if cleaned.isdigit():
         return int(cleaned)
     return None
-
 
 def fetch_and_enrich(item):
     try:
@@ -145,22 +135,17 @@ def fetch_and_enrich(item):
 
     return item
 
-
 def passes_filters(item):
-    # model dopasowany po tytule
     if not title_matches_model(item["title"]):
         return False
 
-    # cena ≤ 8000
     if item.get("price_value") is None or item["price_value"] > 8000:
         return False
 
-    # rocznik ≥ 2017
     if item.get("year") is None or item["year"] < 2017:
         return False
 
     return True
-
 
 def main():
     all_items = []
@@ -177,7 +162,6 @@ def main():
         all_items.extend(items)
         time.sleep(1)
 
-    # deduplikacja
     unique = {item["url"]: item for item in all_items}
     all_items = list(unique.values())
 
@@ -192,7 +176,6 @@ def main():
         json.dump(final, f, indent=4, ensure_ascii=False)
 
     print(f"Zapisano results_kleinanzeigen.json — znaleziono {len(final)} aut")
-
 
 if __name__ == "__main__":
     main()
